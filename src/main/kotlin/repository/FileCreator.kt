@@ -234,29 +234,17 @@ class FileCreatorImpl(
     override fun createMVIModule(fileName: String, moduleName: String, packageName: String) {
         ApplicationManager.getApplication().runWriteAction {
             val sourceDirVF = sourceRootRepository.findAppModuleCodeSourceRoot().virtualFile
-//            val userPackageDirVF = findPackageDir(sourceDirVF.virtualFile)
             val resDirVF = sourceRootRepository.findAppModuleResSourceRoot().virtualFile
-
             val layoutDir = PsiManager.getInstance(project).findDirectory(resDirVF.findChild("layout")!!)!!
-
             var dirVF = sourceDirVF
             for (pack in packageName.split(".").toTypedArray()) {
                 dirVF = dirVF.findChild(pack)!!
             }
 
-
             val uiVF = dirVF.findChild("ui")!!
             val modulePsiDirectory = createPackageDirectory(moduleName, uiVF)
-//            val moduleDirVF = uiVF.findChild(moduleName)!!
-//
-//            val createdPackageDirVF = userPackageDirVF.children.first()
-//
-//            var createdPackagePath = createdPackageDirVF.path.removePrefix(sourceDirVF.path + "/")
-//            createdPackagePath = createdPackagePath.replace("/", ".")
-//            val userPackagePath = createdPackagePath.removeSuffix(".$packageName")
-//
             createMVIFiles(fileName, "$packageName.ui.$moduleName", packageName, modulePsiDirectory)
-            createXMLFile(FileType.Layout(fileName), layoutDir)
+            createXMLFile(FileType.Layout(fileName, "$packageName.ui.$moduleName"), layoutDir)
         }
     }
 

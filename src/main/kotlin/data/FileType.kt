@@ -144,7 +144,7 @@ sealed class FileType(val fileName: String, val content: String) {
                 "    inflater: LayoutInflater,\n" +
                 "    container: ViewGroup?\n" +
                 "  ) {\n" +
-                "    binding = DataBindingUtil.inflate(inflater, R.layout.fragment_${fileName.toLowerCase()}, container, false)\n" +
+                "    binding = DataBindingUtil.inflate(inflater, R.layout.fragment_${fileName.replace(Regex("([^_A-Z])([A-Z])"), "$1_$2").toLowerCase()}, container, false)\n" +
                 "  }\n" +
                 "\n" +
                 "  override fun initIntents() {\n" +
@@ -602,18 +602,22 @@ sealed class FileType(val fileName: String, val content: String) {
                 "}"
     )
 
-    class Layout(fileName: String) : FileType(
-        "fragment_${fileName.toLowerCase()}.xml",
+    class Layout(fileName: String, packageName: String) : FileType(
+        "fragment_${fileName.replace(Regex("([^_A-Z])([A-Z])"), "$1_$2").toLowerCase()}.xml",
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
                 "<layout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n" +
                 "    xmlns:app=\"http://schemas.android.com/apk/res-auto\"\n" +
                 "    xmlns:tools=\"http://schemas.android.com/tools\"\n" +
                 "    >\n" +
+                " <data>\n" +
+                "    <import type=\"android.view.View\"/>\n" +
+                "\n" +
+                "    <variable\n" +
+                "        name=\"viewState\"\n" +
+                "        type=\"$packageName.${fileName}State\"/>\n" +
+                "  </data>" +
                 "\n" +
                 "<androidx.constraintlayout.widget.ConstraintLayout\n" +
-                "        xmlns:android=\"http://schemas.android.com/apk/res/android\"\n" +
-                "        xmlns:tools=\"http://schemas.android.com/tools\"\n" +
-                "        xmlns:utils=\"http://schemas.android.com/apk/res-auto\"\n" +
                 "        android:layout_width=\"match_parent\"\n" +
                 "        android:layout_height=\"match_parent\"\n" +
                 "        >\n" +
@@ -622,10 +626,10 @@ sealed class FileType(val fileName: String, val content: String) {
                 "            android:layout_width=\"wrap_content\"\n" +
                 "            android:layout_height=\"wrap_content\"\n" +
                 "            android:text=\"Hello World!\"\n" +
-                "            utils:layout_constraintBottom_toBottomOf=\"parent\"\n" +
-                "            utils:layout_constraintLeft_toLeftOf=\"parent\"\n" +
-                "            utils:layout_constraintRight_toRightOf=\"parent\"\n" +
-                "            utils:layout_constraintTop_toTopOf=\"parent\"/>\n" +
+                "            app:layout_constraintBottom_toBottomOf=\"parent\"\n" +
+                "            app:layout_constraintLeft_toLeftOf=\"parent\"\n" +
+                "            app:layout_constraintRight_toRightOf=\"parent\"\n" +
+                "            app:layout_constraintTop_toTopOf=\"parent\"/>\n" +
                 "\n" +
                 " </androidx.constraintlayout.widget.ConstraintLayout>\n" +
                 "</layout>"
@@ -869,7 +873,7 @@ sealed class FileType(val fileName: String, val content: String) {
                 "import $packageName.common.ImageLoader\n" +
                 "import $packageName.common.ImageBindingAdapter\n" +
                 "import org.koin.dsl.module.module\n" +
-                " */\n" +
+                "\n" +
                 "val utilsModule = module {\n" +
                 "\n" +
                 "  single<ImageLoader> { GlideImageLoader }\n" +
@@ -898,6 +902,32 @@ sealed class FileType(val fileName: String, val content: String) {
                 "    fun render(state: State)\n" +
                 "}\n" +
                 "\n" +
+                "abstract class BaseFragment<DB : ViewDataBinding> : Fragment() {\n" +
+                "  protected var viewBinding: DB? = null\n" +
+                "    private set\n" +
+                "\n" +
+                "  abstract fun resLayoutId(): Int\n" +
+                "\n" +
+                "  override fun onCreateView(\n" +
+                "    inflater: LayoutInflater,\n" +
+                "    container: ViewGroup?,\n" +
+                "    savedInstanceState: Bundle?\n" +
+                "  ): View? {\n" +
+                "    viewBinding = DataBindingUtil.inflate(\n" +
+                "      LayoutInflater.from(context),\n" +
+                "      resLayoutId(),\n" +
+                "      container,\n" +
+                "      false\n" +
+                "    )\n" +
+                "    return viewBinding!!.root\n" +
+                "  }\n" +
+                "\n" +
+                "  override fun onDestroyView() {\n" +
+                "    super.onDestroyView()\n" +
+                "    viewBinding = null\n" +
+                "  }\n" +
+                "\n" +
+                "}" +
                 "\n" +
                 "abstract class BaseViewModel<State> : ViewModel() {\n" +
                 "\n" +
