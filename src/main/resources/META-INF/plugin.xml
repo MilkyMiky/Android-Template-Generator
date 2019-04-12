@@ -1,0 +1,49 @@
+<idea-plugin>
+    <id>com.dev.mike.templategenerator</id>
+    <name>Template Generator</name>
+    <vendor email="" url=""></vendor>
+
+    <description>Plugin for auto generating code of android architectures.</description>
+
+    <idea-version since-build="141"/>
+
+    <depends>com.intellij.modules.lang</depends>
+    <depends>org.jetbrains.kotlin</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+
+    </extensions>
+
+    <actions>
+        <group id="org.jetbrains.tutorials.actions.GroupedActions" text="Project Template" popup="true">
+            <add-to-group group-id="NewGroup" anchor="first"/>
+            <action id="MVITemplate"
+                    class="ui.mvi.MVIAction"
+                    text="MVI template"
+                    description="Create MVI Template"/>
+
+            <action id="BuildSrcModule"
+                    class="ui.build_src.BuildSrcAction"
+                    text="Build src"
+                    description="Create build Src folder with dependencies."/>
+
+            <action id="RepositoryModule"
+                    class="ui.repo.RepoAction"
+                    text="Repository module"
+                    description="Create repository module"/>
+
+            <action id="UtilsModule"
+                    class="ui.utils.UtilsAction"
+                    text="Utils module"
+                    description="Utils module"/>
+
+            <action id="AppModule"
+                    class="ui.app.AppAction"
+                    text="App module"
+                    description="App module"/>
+
+
+        </group>
+    </actions>
+
+</idea-plugin>
