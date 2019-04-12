@@ -9,14 +9,16 @@ import javax.swing.JTextField
 class MVIPanel : JPanel(true) {
 
 
-    val nameTextField = JTextField()
+    val fileNameTextField = JTextField()
     val packageTextField = JTextField()
+    val moduleTextField = JTextField()
 
     init {
         layout = BorderLayout()
         val panel = panel {
             row("Package:") { packageTextField() }
-            row("Name:") { nameTextField() }
+            row("Module:") { moduleTextField() }
+            row("ClassName:") { fileNameTextField() }
         }
         add(panel, BorderLayout.CENTER)
     }

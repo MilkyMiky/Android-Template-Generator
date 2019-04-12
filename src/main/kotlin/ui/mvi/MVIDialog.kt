@@ -9,7 +9,7 @@ import repository.SourceRootRepositoryImpl
 
 class MVIDialog(project: Project) : DialogWrapper(true), MVIView {
 
-    private val presenter : MVIPresenter
+    private val presenter: MVIPresenter
 
     private val panel = MVIPanel()
 
@@ -32,8 +32,9 @@ class MVIDialog(project: Project) : DialogWrapper(true), MVIView {
 
     override fun doOKAction() {
         presenter.onOkClick(
-                panel.nameTextField.text,
-                panel.packageTextField.text
+            panel.fileNameTextField.text,
+            panel.moduleTextField.text,
+            panel.packageTextField.text
         )
     }
 }

@@ -15,7 +15,7 @@ import com.intellij.psi.PsiDocumentManager
 
 interface FileCreator {
 
-    fun createModule(fileName: String, packageName: String)
+    fun createMVIModule(fileName: String, moduleName: String, packageName: String)
 
     fun createBuildSrc()
 
@@ -26,8 +26,10 @@ interface FileCreator {
     fun createUtilsModule(packageName: String)
 }
 
-class FileCreatorImpl(private val project: Project,
-                      private val sourceRootRepository: SourceRootRepository) : FileCreator {
+class FileCreatorImpl(
+    private val project: Project,
+    private val sourceRootRepository: SourceRootRepository
+) : FileCreator {
 
     override fun prepareAppModule(packageName: String) {
         ApplicationManager.getApplication().runWriteAction {
@@ -39,7 +41,7 @@ class FileCreatorImpl(private val project: Project,
             appPsiDir.findFile("build.gradle")!!.delete()
             createBuildGradle(FileType.AppBuildGradle(packageName), appPsiDir)
 
-            var dirVF = sourceRootRepository.findCodeSourceRoot().virtualFile
+            var dirVF = sourceRootRepository.findAppModuleCodeSourceRoot().virtualFile
             for (pack in packageName.split(".").toTypedArray()) dirVF = dirVF.findChild(pack)!!
 
             val applicationPsiDir = createPackageDirectory("application", dirVF)
@@ -56,12 +58,13 @@ class FileCreatorImpl(private val project: Project,
 
             val projectDirectory = project.projectFile!!.parent.parent
 
-            val psiFile = PsiManager.getInstance(project).findDirectory(projectDirectory)!!.findFile("settings.gradle")!!
+            val psiFile =
+                PsiManager.getInstance(project).findDirectory(projectDirectory)!!.findFile("settings.gradle")!!
             val doc = PsiDocumentManager.getInstance(project).getDocument(psiFile)!!
 
             val newDocumentContent =
-                    if (doc.text.contains("\n")) doc.text.replace("\n", ", ':utils'\n")
-                    else doc.text + ", ':utils'\n"
+                if (doc.text.contains("\n")) doc.text.replace("\n", ", ':utils'\n")
+                else doc.text + ", ':utils'\n"
 
             PsiManager.getInstance(project).findDirectory(projectDirectory)!!.findFile("settings.gradle")!!.delete()
             val file = PsiFileFactory.getInstance(project).createFileFromText("settings.gradle", newDocumentContent)
@@ -111,17 +114,17 @@ class FileCreatorImpl(private val project: Project,
         }
     }
 
-
     override fun createRepository(packageName: String) {
         ApplicationManager.getApplication().runWriteAction {
             val projectDirectory = project.projectFile!!.parent.parent
 
-            val psiFile = PsiManager.getInstance(project).findDirectory(projectDirectory)!!.findFile("settings.gradle")!!
+            val psiFile =
+                PsiManager.getInstance(project).findDirectory(projectDirectory)!!.findFile("settings.gradle")!!
             val doc = PsiDocumentManager.getInstance(project).getDocument(psiFile)!!
 
             val newDocumentContent =
-                    if (doc.text.contains("\n")) doc.text.replace("\n", ", ':repository'\n")
-                    else doc.text + ", ':repository'\n"
+                if (doc.text.contains("\n")) doc.text.replace("\n", ", ':repository'\n")
+                else doc.text + ", ':repository'\n"
 
             PsiManager.getInstance(project).findDirectory(projectDirectory)!!.findFile("settings.gradle")!!.delete()
             val file = PsiFileFactory.getInstance(project).createFileFromText("settings.gradle", newDocumentContent)
@@ -228,25 +231,30 @@ class FileCreatorImpl(private val project: Project,
         }
     }
 
-    override fun createModule(fileName: String, packageName: String) {
+    override fun createMVIModule(fileName: String, moduleName: String, packageName: String) {
         ApplicationManager.getApplication().runWriteAction {
-            val sourceDirVF = sourceRootRepository.findCodeSourceRoot().virtualFile
-            val uiDirVF = sourceRootRepository.findCodeSourceRoot().virtualFile.findChild("ui")!!
-            val userPackageDirVF = findPackageDir(sourceDirVF)
-//
-            val resDirVF = sourceRootRepository.findResourcesSourceRoot().virtualFile
+            val sourceDirVF = sourceRootRepository.findAppModuleCodeSourceRoot().virtualFile
+//            val userPackageDirVF = findPackageDir(sourceDirVF.virtualFile)
+            val resDirVF = sourceRootRepository.findAppModuleResSourceRoot().virtualFile
 
             val layoutDir = PsiManager.getInstance(project).findDirectory(resDirVF.findChild("layout")!!)!!
-//            val packageDir = createPackageDirectory(packageName, uiDirVF)
+
+            var dirVF = sourceDirVF
+            for (pack in packageName.split(".").toTypedArray()) dirVF = dirVF.findChild(pack)!!
+
+
+            val uiVF = dirVF.findChild("ui")!!
+            val modulePsiDirectory = createPackageDirectory(moduleName, uiVF)
+//            val moduleDirVF = uiVF.findChild(moduleName)!!
 //
-//            val createdPackageDirVF = uiDirVF.children.first()
+//            val createdPackageDirVF = userPackageDirVF.children.first()
 //
 //            var createdPackagePath = createdPackageDirVF.path.removePrefix(sourceDirVF.path + "/")
 //            createdPackagePath = createdPackagePath.replace("/", ".")
 //            val userPackagePath = createdPackagePath.removeSuffix(".$packageName")
 //
-//            createModuleFiles(fileName, createdPackagePath, userPackagePath, packageDir)
-//            createXMLFile(FileType.Layout(fileName), layoutDir)
+            createMVIFiles(fileName, "$packageName.ui.$moduleName", packageName, modulePsiDirectory)
+            createXMLFile(FileType.Layout(fileName), layoutDir)
         }
     }
 
@@ -260,17 +268,23 @@ class FileCreatorImpl(private val project: Project,
     }
 
     private fun createPackageDirectory(packageName: String, packageDir: VirtualFile): PsiDirectory =
-            PsiManager.getInstance(project).findDirectory(packageDir)!!.createSubdirectory(packageName)
+        PsiManager.getInstance(project).findDirectory(packageDir)!!.createSubdirectory(packageName)
 
-    private fun createModuleFiles(fileName: String, createdPackagePath: String, userPackagePath: String, directory: PsiDirectory) {
-        createKotlinFile(FileType.Presenter(fileName, createdPackagePath), directory)
-        createKotlinFile(FileType.View(fileName, createdPackagePath), directory)
+    private fun createMVIFiles(
+        fileName: String,
+        createdPackagePath: String,
+        userPackagePath: String,
+        directory: PsiDirectory
+    ) {
+        createKotlinFile(FileType.ViewModel(fileName, createdPackagePath, userPackagePath), directory)
+        createKotlinFile(FileType.State(fileName, createdPackagePath), directory)
         createKotlinFile(FileType.Fragment(fileName, createdPackagePath, userPackagePath), directory)
     }
 
     private fun createKotlinFile(fileType: FileType, directory: PsiDirectory) {
         try {
-            val psiFile = PsiFileFactory.getInstance(project).createFileFromText(fileType.fileName, KotlinLanguage.INSTANCE, fileType.content)
+            val psiFile = PsiFileFactory.getInstance(project)
+                .createFileFromText(fileType.fileName, KotlinLanguage.INSTANCE, fileType.content)
             directory.add(psiFile)
         } catch (e: IncorrectOperationException) {
         }
@@ -297,7 +311,8 @@ class FileCreatorImpl(private val project: Project,
 
     private fun createXMLFile(fileType: FileType, directory: PsiDirectory) {
         try {
-            val psiFile = PsiFileFactory.getInstance(project).createFileFromText(fileType.fileName, XMLLanguage.INSTANCE, fileType.content)
+            val psiFile = PsiFileFactory.getInstance(project)
+                .createFileFromText(fileType.fileName, XMLLanguage.INSTANCE, fileType.content)
             directory.add(psiFile)
         } catch (e: IncorrectOperationException) {
         }
