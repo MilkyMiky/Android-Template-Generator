@@ -240,7 +240,9 @@ class FileCreatorImpl(
             val layoutDir = PsiManager.getInstance(project).findDirectory(resDirVF.findChild("layout")!!)!!
 
             var dirVF = sourceDirVF
-            for (pack in packageName.split(".").toTypedArray()) dirVF = dirVF.findChild(pack)!!
+            for (pack in packageName.split(".").toTypedArray()) {
+                dirVF = dirVF.findChild(pack)!!
+            }
 
 
             val uiVF = dirVF.findChild("ui")!!

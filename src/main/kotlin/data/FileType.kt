@@ -602,11 +602,15 @@ sealed class FileType(val fileName: String, val content: String) {
                 "}"
     )
 
-
     class Layout(fileName: String) : FileType(
         "fragment_${fileName.toLowerCase()}.xml",
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
-                "<android.support.constraint.ConstraintLayout\n" +
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
+                "<layout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n" +
+                "    xmlns:app=\"http://schemas.android.com/apk/res-auto\"\n" +
+                "    xmlns:tools=\"http://schemas.android.com/tools\"\n" +
+                "    >\n" +
+                "\n" +
+                "<androidx.constraintlayout.widget.ConstraintLayout\n" +
                 "        xmlns:android=\"http://schemas.android.com/apk/res/android\"\n" +
                 "        xmlns:tools=\"http://schemas.android.com/tools\"\n" +
                 "        xmlns:utils=\"http://schemas.android.com/apk/res-auto\"\n" +
@@ -623,7 +627,8 @@ sealed class FileType(val fileName: String, val content: String) {
                 "            utils:layout_constraintRight_toRightOf=\"parent\"\n" +
                 "            utils:layout_constraintTop_toTopOf=\"parent\"/>\n" +
                 "\n" +
-                "</android.support.constraint.ConstraintLayout>"
+                " </androidx.constraintlayout.widget.ConstraintLayout>\n" +
+                "</layout>"
     )
 
     class ImageBindingAdapter(packageName: String) : FileType(
