@@ -2,7 +2,6 @@ package data
 
 sealed class FileType(val fileName: String, val content: String) {
 
-
     class Navigator(packageName: String) : FileType(
         "KeepStateNavigator.kt",
         "package $packageName.navigation\n" +
@@ -81,7 +80,6 @@ sealed class FileType(val fileName: String, val content: String) {
                 "\n" +
                 "  override fun getImageBindingAdapter(): ImageBindingAdapter = imgLoader\n" +
                 "}"
-
     )
 
     class Fragment(fileName: String, packageName: String, userPackage: String) : FileType(
@@ -92,60 +90,38 @@ sealed class FileType(val fileName: String, val content: String) {
                 "import android.view.LayoutInflater\n" +
                 "import android.view.View\n" +
                 "import android.view.ViewGroup\n" +
-                "import androidx.databinding.DataBindingUtil\n" +
-                "import androidx.fragment.app.Fragment\n" +
-                "\n" +
                 "import androidx.lifecycle.Observer\n" +
+                "import $userPackage.utils.common.BaseFragment\n" +
+                "import $userPackage.utils.common.BaseView\n" +
                 "import $userPackage.R\n" +
                 "import $userPackage.databinding.Fragment${fileName}Binding\n" +
                 "import $packageName.${fileName}StateIntent.GetSampleData\n" +
-                "import $packageName.${fileName}ViewModel\n"+
-                "import $userPackage.utils.common.BaseView\n" +
+
                 "import io.reactivex.Observable\n" +
-                "import io.reactivex.disposables.CompositeDisposable\n" +
-                "import io.reactivex.disposables.Disposable\n" +
                 "import org.koin.androidx.viewmodel.ext.android.viewModel\n" +
                 "\n" +
-                "class ${fileName}Fragment : Fragment(), BaseView<${fileName}State> {\n" +
+                "class ${fileName}Fragment : BaseFragment<Fragment${fileName}Binding>(), BaseView<${fileName}State> {\n" +
                 "\n" +
-                "  private var viewSubscriptions: Disposable? = null\n" +
-                "  private var compositeDisposable: CompositeDisposable? = null\n" +
-                "  private var binding: Fragment${fileName}Binding? = null\n" +
                 "  private val vm${fileName}Screen: ${fileName}ViewModel by viewModel()\n" +
+                "\n" +
+                "   override fun resLayoutId(): Int = R.layout.fragment_${fileName.replace(
+                    Regex("([^_A-Z])([A-Z])"),
+                    "$1_$2"
+                ).toLowerCase()}\n" +
                 "\n" +
                 "  override fun onCreate(savedInstanceState: Bundle?) {\n" +
                 "    super.onCreate(savedInstanceState)\n" +
                 "    handleStates()\n" +
                 "  }\n" +
                 "\n" +
-                "  override fun onCreateView(\n" +
+                " override fun onCreateView(\n" +
                 "    inflater: LayoutInflater,\n" +
                 "    container: ViewGroup?,\n" +
                 "    savedInstanceState: Bundle?\n" +
-                "  ): View? {\n" +
-                "\n" +
-                "    initBinding(inflater, container)\n" +
-                "    initIntents()\n" +
-                "    return binding!!.root\n" +
-                "  }\n" +
-                "\n" +
-                "  override fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n" +
-                "    super.onViewCreated(view, savedInstanceState)\n" +
-                "  }\n" +
-                "\n" +
-                "  override fun onDestroyView() {\n" +
-                "    super.onDestroyView()\n" +
-                "    compositeDisposable?.dispose()\n" +
-                "    viewSubscriptions?.dispose()\n" +
-                "    binding = null\n" +
-                "  }\n" +
-                "\n" +
-                "  private fun initBinding(\n" +
-                "    inflater: LayoutInflater,\n" +
-                "    container: ViewGroup?\n" +
-                "  ) {\n" +
-                "    binding = DataBindingUtil.inflate(inflater, R.layout.fragment_${fileName.replace(Regex("([^_A-Z])([A-Z])"), "$1_$2").toLowerCase()}, container, false)\n" +
-                "  }\n" +
+                "  ): View? = super.onCreateView(inflater, container, savedInstanceState)\n" +
+                "    .also {\n" +
+                "      initIntents()\n" +
+                "    }\n" +
                 "\n" +
                 "  override fun initIntents() {\n" +
                 "    viewSubscriptions = Observable.merge(\n" +
@@ -160,7 +136,7 @@ sealed class FileType(val fileName: String, val content: String) {
                 "  }\n" +
                 "\n" +
                 "  override fun render(state: ${fileName}State) {\n" +
-                "    binding!!.viewState = state\n" +
+                "    viewBinding!!.viewState = state\n" +
                 "  }\n" +
                 "}"
     )
@@ -170,19 +146,47 @@ sealed class FileType(val fileName: String, val content: String) {
         "package $packageName\n" +
                 "\n" +
                 "import $userPackage.utils.common.BaseViewModel\n" +
+                "import $userPackage.utils.common.startWithAndErrHandleWithIO\n" +
+                "import $packageName.${fileName}StateChange.*" +
+                "import $packageName.${fileName}StateIntent.*" +
                 "import io.reactivex.Observable\n" +
                 "\n" +
                 "class ${fileName}ViewModel() : BaseViewModel<${fileName}State>() {\n" +
                 "\n" +
                 "  override fun initState(): ${fileName}State = ${fileName}State()\n" +
                 "\n" +
-                "  override fun viewIntents(intentStream: Observable<*>): Observable<Any> {\n" +
-                "    TODO(\"not implemented\") //To change body of created functions use File | Settings | File Templates.\n" +
-                "  }\n" +
+                "  override fun viewIntents(intentStream: Observable<*>): Observable<Any> = \n" +
+                "    Observable.merge(\n" +
+                "      listOf(" +
+                "           intentStream.ofType(GetSampleData::class.java)\n" +
+                "                    .map { Success }\n" +
+                "                    .startWithAndErrHandleWithIO(Loading) { Observable.just(Error(it), HideError) })\n" +
+                "    )" +
                 "\n" +
-                "  override fun reduceState(previousState: ${fileName}State, stateChange: Any): ${fileName}State {\n" +
-                "    TODO(\"not implemented\") //To change body of created functions use File | Settings | File Templates.\n" +
-                "  }\n" +
+                "  override fun reduceState(previousState: ${fileName}State, stateChange: Any): ${fileName}State = \n" +
+                "  when (stateChange) {\n" +
+                "            is Loading -> previousState.copy(\n" +
+                "                loading = true,\n" +
+                "                success = false,\n" +
+                "                error = null\n" +
+                "            )\n" +
+                "\n" +
+                "            is Success -> previousState.copy(\n" +
+                "                loading = false,\n" +
+                "                success = true,\n" +
+                "                error = null\n" +
+                "            )\n" +
+                "\n" +
+                "            is Error -> previousState.copy(\n" +
+                "                loading = false,\n" +
+                "                success = false,\n" +
+                "                error = stateChange.error\n" +
+                "            )\n" +
+                "\n" +
+                "            is HideError -> previousState.copy(error = null)\n" +
+                "\n" +
+                "            else -> previousState\n" +
+                "        }\n" +
                 "}"
     )
 
@@ -190,7 +194,8 @@ sealed class FileType(val fileName: String, val content: String) {
         "${fileName}State.kt",
         "package $packageName\n" +
                 "\n" +
-                "class ${fileName}State(\n" +
+                "data class ${fileName}State(\n" +
+                "  val success: Boolean = false," +
                 "  val loading: Boolean = false,\n" +
                 "  val error: Throwable? = null\n" +
                 ")\n" +
@@ -362,23 +367,6 @@ sealed class FileType(val fileName: String, val content: String) {
                 "  override fun observeEntities(): Observable<List<Entity>> {\n" +
                 "    TODO(\"not implemented\") //To change body of created functions use File | Settings | File Templates.\n" +
                 "  }\n" +
-
-//                    "  override fun getNextCatsPage(page: Int, limit: Int): Observable<List<Cat>> =\n" +
-//                    "    api.getCats(page, limit)\n" +
-//                    "      .map { list -> if (list.isNotEmpty()) list.map { it.toDomain() } else emptyList() }\n" +
-//                    "\n" +
-//                    "  override fun findByName(name: String): Observable<List<Cat>> {\n" +
-//                    "    TODO(\"not implemented\") //To change body of created functions use File | Settings | File Templates.\n" +
-//                    "  }\n" +
-//                    "\n" +
-//                    "  override fun insertCats(cats: List<Cat>): Completable =\n" +
-//                    "    Completable.fromAction { val i = 0 }\n" +
-//                    "\n" +
-//                    "  private fun CatR.toDomain() =\n" +
-//                    "    Cat(\n" +
-//                    "      id = id ?: \"\",\n" +
-//                    "      url = url ?: \"\"\n" +
-//                    "    )\n" +
                 "}"
     )
 
@@ -395,28 +383,10 @@ sealed class FileType(val fileName: String, val content: String) {
                 "\n" +
                 "class EntityLocalSource(private val entityDao: EntityDao) : EntityDataSource {\n" +
                 "\n" +
-//                    "  override fun observeEntities(): Observable<List<Entity>> {\n" +
-//                    "    TODO(\"not implemented\") //To change body of created functions use File | Settings | File Templates.\n" +
-//                    "  }\n" +
-//                    "class CatsLocalSource(private val catsDao: CatsDao) :\n" +
-//                    "  CatsDataSource {\n" +
-//                    "\n" +
                 "  override fun observeEntities(): Observable<List<Entity>> =\n" +
                 "    entityDao.getAll()\n" +
                 "      .map { if (it.isEmpty()) emptyList() else it.map { item -> item.toDomain() } }\n" +
                 "      .toObservable()\n" +
-//                    "\n" +
-//                    "  override fun getNextCatsPage(page: Int, limit: Int): Observable<List<Cat>> =\n" +
-//                    "    throw UnsupportedOperationException(\"Local data source doesn't support getNextCatsPage()\")\n" +
-//                    "\n" +
-//                    "  override fun findByName(name: String): Observable<List<Cat>> =\n" +
-//                    "    catsDao.findById(name)\n" +
-//                    "      .map { if (it.isEmpty()) emptyList() else it.map { item -> item.toDomain() } }\n" +
-//                    "      .toObservable()\n" +
-//                    "\n" +
-//                    "  override fun insertCats(cats: List<Cat>): Completable = Completable.fromAction {\n" +
-//                    "    catsDao.insertAll(cats.map { it.toLocal() })\n" +
-//                    "  }\n" +
                 "\n" +
                 "  private fun EntityL.toDomain() =\n" +
                 "    Entity(\n" +
@@ -641,7 +611,6 @@ sealed class FileType(val fileName: String, val content: String) {
                 "\n" +
                 "import android.widget.ImageView\n" +
                 "import androidx.databinding.BindingAdapter\n" +
-                "import $packageName.common.ImageLoader\n" +
                 "\n" +
                 "class ImageBindingAdapter constructor(private val imageLoader: ImageLoader) {\n" +
                 "\n" +
@@ -767,11 +736,7 @@ sealed class FileType(val fileName: String, val content: String) {
         "Common.kt",
         "package $packageName.common\n" +
                 "\n" +
-                "import android.animation.Animator\n" +
-                "import android.animation.AnimatorListenerAdapter\n" +
                 "import android.content.res.Resources\n" +
-                "import android.view.State\n" +
-                "import android.view.animation.LinearInterpolator\n" +
                 "import android.view.animation.OvershootInterpolator\n" +
                 "import android.widget.ImageView\n" +
                 "import androidx.annotation.DrawableRes\n" +
@@ -791,59 +756,6 @@ sealed class FileType(val fileName: String, val content: String) {
                 "    .start()\n" +
                 "\n" +
                 "  imageView.postDelayed({ imageView.setImageResource(resId) }, 120)\n" +
-                "}\n" +
-                "\n" +
-                "fun State.touchDownAnimation() {\n" +
-                "  this.animate()\n" +
-                "    .scaleX(0.88f)\n" +
-                "    .scaleY(0.88f)\n" +
-                "    .setDuration(300)\n" +
-                "    .setInterpolator(OvershootInterpolator())\n" +
-                "    .start()\n" +
-                "}\n" +
-                "\n" +
-                "fun State.expandPresetAnimationOut() {\n" +
-                "  this.animate()\n" +
-                "    .scaleX(0f)\n" +
-                "    .alpha(0f)\n" +
-                "    .setDuration(200)\n" +
-                "    .setListener(object : AnimatorListenerAdapter() {\n" +
-                "      override fun onAnimationEnd(animation: Animator?) {\n" +
-                "        super.onAnimationEnd(animation)\n" +
-                "        this@expandPresetAnimationOut.visibility = State.GONE\n" +
-                "      }\n" +
-                "    })\n" +
-                "    .setInterpolator(LinearInterpolator())\n" +
-                "    .start()\n" +
-                "}\n" +
-                "\n" +
-                "fun State.expandPresetsAnimationIn(xPoint: Float, yPoint: Float) {\n" +
-                "  with(this) {\n" +
-                "    pivotX = xPoint\n" +
-                "    pivotY = yPoint\n" +
-                "    visibility = State.VISIBLE\n" +
-                "    animate()\n" +
-                "      .scaleX(1f)\n" +
-                "      .alpha(1f)\n" +
-                "      .setListener(object : AnimatorListenerAdapter() {\n" +
-                "        override fun onAnimationEnd(animation: Animator?, isReverse: Boolean) {\n" +
-                "          super.onAnimationEnd(animation, isReverse)\n" +
-                "          animate().setListener(null)\n" +
-                "        }\n" +
-                "      })\n" +
-                "      .setDuration(200)\n" +
-                "      .setInterpolator(LinearInterpolator())\n" +
-                "      .start()\n" +
-                "  }\n" +
-                "}\n" +
-                "\n" +
-                "fun State.touchUpAnimation() {\n" +
-                "  this.animate()\n" +
-                "    .scaleX(1f)\n" +
-                "    .scaleY(1f)\n" +
-                "    .setDuration(200)\n" +
-                "    .setInterpolator(OvershootInterpolator())\n" +
-                "    .start()\n" +
                 "}\n" +
                 "\n" +
                 "inline fun <T, reified R> Observable<T>.startWithAndErrHandleWithIO(\n" +
@@ -885,13 +797,55 @@ sealed class FileType(val fileName: String, val content: String) {
         "BaseComponents.kt",
         "package $packageName.common\n" +
                 "\n" +
+                "import android.os.Bundle\n" +
+                "import android.view.LayoutInflater\n" +
+                "import android.view.View\n" +
+                "import android.view.ViewGroup\n" +
+                "import androidx.databinding.DataBindingUtil\n" +
+                "import androidx.databinding.ViewDataBinding\n" +
+                "import androidx.fragment.app.Fragment\n" +
                 "import androidx.lifecycle.LiveData\n" +
                 "import androidx.lifecycle.MutableLiveData\n" +
                 "import androidx.lifecycle.ViewModel\n" +
                 "import com.jakewharton.rxrelay2.PublishRelay\n" +
                 "import io.reactivex.Observable\n" +
                 "import io.reactivex.android.schedulers.AndroidSchedulers\n" +
+                "import io.reactivex.disposables.CompositeDisposable\n" +
                 "import io.reactivex.disposables.Disposable\n" +
+                "\n" +
+                "abstract class BaseFragment<DB : ViewDataBinding> : Fragment() {\n" +
+                "\n" +
+                "    protected var viewSubscriptions: Disposable? = null\n" +
+                "    protected var compositeDisposable: CompositeDisposable? = null\n" +
+                "\n" +
+                "    protected var viewBinding: DB? = null\n" +
+                "        private set\n" +
+                "\n" +
+                "    abstract fun resLayoutId(): Int\n" +
+                "\n" +
+                "    override fun onCreateView(\n" +
+                "        inflater: LayoutInflater,\n" +
+                "        container: ViewGroup?,\n" +
+                "        savedInstanceState: Bundle?\n" +
+                "    ): View? {\n" +
+                "        compositeDisposable = CompositeDisposable()\n" +
+                "        viewBinding = DataBindingUtil.inflate(\n" +
+                "            LayoutInflater.from(context),\n" +
+                "            resLayoutId(),\n" +
+                "            container,\n" +
+                "            false\n" +
+                "        )\n" +
+                "        return viewBinding!!.root\n" +
+                "    }\n" +
+                "\n" +
+                "    override fun onDestroyView() {\n" +
+                "        super.onDestroyView()\n" +
+                "        compositeDisposable?.dispose()\n" +
+                "        viewSubscriptions?.dispose()\n" +
+                "        viewBinding = null\n" +
+                "    }\n" +
+                "\n" +
+                "}\n" +
                 "\n" +
                 "interface BaseView<State> {\n" +
                 "\n" +
@@ -902,32 +856,6 @@ sealed class FileType(val fileName: String, val content: String) {
                 "    fun render(state: State)\n" +
                 "}\n" +
                 "\n" +
-                "abstract class BaseFragment<DB : ViewDataBinding> : Fragment() {\n" +
-                "  protected var viewBinding: DB? = null\n" +
-                "    private set\n" +
-                "\n" +
-                "  abstract fun resLayoutId(): Int\n" +
-                "\n" +
-                "  override fun onCreateView(\n" +
-                "    inflater: LayoutInflater,\n" +
-                "    container: ViewGroup?,\n" +
-                "    savedInstanceState: Bundle?\n" +
-                "  ): View? {\n" +
-                "    viewBinding = DataBindingUtil.inflate(\n" +
-                "      LayoutInflater.from(context),\n" +
-                "      resLayoutId(),\n" +
-                "      container,\n" +
-                "      false\n" +
-                "    )\n" +
-                "    return viewBinding!!.root\n" +
-                "  }\n" +
-                "\n" +
-                "  override fun onDestroyView() {\n" +
-                "    super.onDestroyView()\n" +
-                "    viewBinding = null\n" +
-                "  }\n" +
-                "\n" +
-                "}" +
                 "\n" +
                 "abstract class BaseViewModel<State> : ViewModel() {\n" +
                 "\n" +
@@ -1016,8 +944,6 @@ sealed class FileType(val fileName: String, val content: String) {
                 "# If you keep the line number information, uncomment this to\n" +
                 "# hide the original source file name.\n" +
                 "#-renamesourcefileattribute SourceFile"
-
-
     )
 
 
@@ -1043,8 +969,11 @@ sealed class FileType(val fileName: String, val content: String) {
                 "    }\n" +
                 "\n" +
                 "    buildTypes {\n" +
+                "        debug {\n" +
+                "           minifyEnabled false\n" +
+                "        }\n" +
                 "        release {\n" +
-                "            minifyEnabled false\n" +
+                "            minifyEnabled true\n" +
                 "            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'\n" +
                 "        }\n" +
                 "    }\n" +
