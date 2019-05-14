@@ -17,13 +17,10 @@ interface FileCreator {
 
     fun createMVIModule(fileName: String, moduleName: String, packageName: String)
 
-    fun createBuildSrc()
-
     fun createRepository(packageName: String)
 
     fun prepareAppModule(packageName: String)
 
-    fun createUtilsModule(packageName: String)
 }
 
 class FileCreatorImpl(
@@ -35,6 +32,9 @@ class FileCreatorImpl(
         ApplicationManager.getApplication().runWriteAction {
 
             val projectDirectory = project.projectFile!!.parent.parent
+
+            createBuildGradle(FileType.DepsBuildGradle(), PsiManager.getInstance(project).findDirectory(projectDirectory)!!)
+
             val appVF = projectDirectory.findChild("app")!!
 
             val appPsiDir = PsiManager.getInstance(project).findDirectory(appVF)!!
@@ -48,71 +48,17 @@ class FileCreatorImpl(
             val diPsiDir = createPackageDirectory("di", dirVF)
             createKotlinFile(FileType.MainModule(packageName), diPsiDir)
             val uiPsiDir = createPackageDirectory("ui", dirVF)
-            val navPsiDirectory = createPackageDirectory("navigation", dirVF)
-            createKotlinFile(FileType.Navigator(packageName), navPsiDirectory)
-        }
-    }
-
-    override fun createUtilsModule(packageName: String) {
-        ApplicationManager.getApplication().runWriteAction {
-
-            val projectDirectory = project.projectFile!!.parent.parent
-
-            val psiFile =
-                PsiManager.getInstance(project).findDirectory(projectDirectory)!!.findFile("settings.gradle")!!
-            val doc = PsiDocumentManager.getInstance(project).getDocument(psiFile)!!
-
-            val newDocumentContent =
-                if (doc.text.contains("\n")) doc.text.replace("\n", ", ':utils'\n")
-                else doc.text + ", ':utils'\n"
-
-            PsiManager.getInstance(project).findDirectory(projectDirectory)!!.findFile("settings.gradle")!!.delete()
-            val file = PsiFileFactory.getInstance(project).createFileFromText("settings.gradle", newDocumentContent)
-            PsiManager.getInstance(project).findDirectory(projectDirectory)!!.add(file)
-
-            val utilsDir = createPackageDirectory("utils", projectDirectory)
-            val utilsVF = projectDirectory.findChild("utils")!!
-
-            createPackageDirectory("src", utilsVF)
-            val srcVF = utilsVF.findChild("src")!!
-
-            val mainDir = createPackageDirectory("main", srcVF)
-            val mainVF = srcVF.findChild("main")!!
-
-            createPackageDirectory("java", mainVF)
-            val javaVF = mainVF.findChild("java")
-
-            createPackageDirectory("res", mainVF)
-
-            createXMLFile(FileType.Manifest(packageName), mainDir)
-            createBuildGradle(FileType.UtilsBuildGradle(), utilsDir)
-            createProguard(utilsDir)
-
-            var dirVF = javaVF!!
-            for (pack in packageName.split(".").toTypedArray()) {
-                createPackageDirectory(pack, dirVF)
-                dirVF = dirVF.findChild(pack)!!
-            }
-            val diPsiDirectory = createPackageDirectory("di", dirVF)
-            createKotlinFile(FileType.UtilsModule(packageName), diPsiDirectory)
-
             val commonPsiDirectory = createPackageDirectory("common", dirVF)
-            val commonVF = dirVF.findChild("common")!!
-
+            createKotlinFile(FileType.NavigationExtensions(packageName), commonPsiDirectory)
 
             createKotlinFile(FileType.BaseComponents(packageName), commonPsiDirectory)
             createKotlinFile(FileType.Common(packageName), commonPsiDirectory)
             createKotlinFile(FileType.ImageLoader(packageName), commonPsiDirectory)
             createKotlinFile(FileType.GlideImageLoader(packageName), commonPsiDirectory)
             createKotlinFile(FileType.ImageBindingAdapter(packageName), commonPsiDirectory)
-
-//            createPackageDirectory("anim", sourceRootRepository.findResourcesSourceRoot().virtualFile)
-//            createPackageDirectory("drawable", sourceRootRepository.findResourcesSourceRoot().virtualFile)
-//            createPackageDirectory("font", sourceRootRepository.findResourcesSourceRoot().virtualFile)
-//            createPackageDirectory("menu", sourceRootRepository.findResourcesSourceRoot().virtualFile)
-//            createPackageDirectory("values", sourceRootRepository.findResourcesSourceRoot().virtualFile)
         }
     }
+
 
     override fun createRepository(packageName: String) {
         ApplicationManager.getApplication().runWriteAction {
@@ -212,24 +158,6 @@ class FileCreatorImpl(
         }
     }
 
-    override fun createBuildSrc() {
-        ApplicationManager.getApplication().runWriteAction {
-            val projectDirectory = project.projectFile!!.parent.parent
-            val buildSrcDir = createPackageDirectory("buildSrc", projectDirectory)
-            createKotlinFile(FileType.BuildSrc(), buildSrcDir)
-
-            val buildSrc = projectDirectory.findChild("buildSrc")
-            createPackageDirectory("src", buildSrc!!)
-
-            val src = buildSrc.findChild("src")
-            createPackageDirectory("main", src!!)
-
-            val main = src.findChild("main")
-            val javaDir = createPackageDirectory("java", main!!)
-
-            createKotlinFile(FileType.Deps(), javaDir)
-        }
-    }
 
     override fun createMVIModule(fileName: String, moduleName: String, packageName: String) {
         ApplicationManager.getApplication().runWriteAction {

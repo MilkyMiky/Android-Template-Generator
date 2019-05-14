@@ -2,76 +2,258 @@ package data
 
 sealed class FileType(val fileName: String, val content: String) {
 
-    class Navigator(packageName: String) : FileType(
-        "KeepStateNavigator.kt",
-        "package $packageName.navigation\n" +
+    class NavigationExtensions(packageName: String) : FileType(
+        "NavigationExtensions.kt",
+        "package $packageName.common\n" +
                 "\n" +
-                "import android.content.Context\n" +
-                "import android.os.Bundle\n" +
+                "import android.content.Intent\n" +
+                "import android.util.SparseArray\n" +
+                "import androidx.core.util.forEach\n" +
+                "import androidx.core.util.set\n" +
                 "import androidx.fragment.app.FragmentManager\n" +
-                "import androidx.navigation.NavDestination\n" +
-                "import androidx.navigation.NavOptions\n" +
-                "import androidx.navigation.Navigator\n" +
-                "import androidx.navigation.fragment.FragmentNavigator\n" +
+                "import androidx.lifecycle.LiveData\n" +
+                "import androidx.lifecycle.MutableLiveData\n" +
+                "import androidx.navigation.NavController\n" +
+                "import androidx.navigation.fragment.NavHostFragment\n" +
+                "import com.google.android.material.bottomnavigation.BottomNavigationView\n" +
+                "import $packageName.R\n" +
                 "\n" +
-                "@Navigator.Name(\"keep_state_fragment\") // `keep_state_fragment` is used in navigation xml\n" +
-                "class KeepStateNavigator(\n" +
-                "  private val context: Context,\n" +
-                "  private val manager: FragmentManager, // Should pass childFragmentManager.\n" +
-                "  private val containerId: Int\n" +
-                ") : FragmentNavigator(context, manager, containerId) {\n" +
                 "\n" +
-                "  override fun navigate(\n" +
-                "    destination: Destination,\n" +
-                "    args: Bundle?,\n" +
-                "    navOptions: NavOptions?,\n" +
-                "    navigatorExtras: Navigator.Extras?\n" +
-                "  ): NavDestination? {\n" +
-                "    val tag = destination.id.toString()\n" +
-                "    val transaction = manager.beginTransaction()\n" +
+                "fun BottomNavigationView.setupWithNavController(\n" +
+                "    navGraphIds: List<Int>,\n" +
+                "    fragmentManager: FragmentManager,\n" +
+                "    containerId: Int,\n" +
+                "    intent: Intent\n" +
+                "): LiveData<NavController> {\n" +
                 "\n" +
-                "    val currentFragment = manager.primaryNavigationFragment\n" +
-                "    var initialNavigate = false\n" +
-                "    if (currentFragment != null) {\n" +
-                "      transaction.detach(currentFragment)\n" +
-                "    } else {\n" +
-                "      initialNavigate = true\n" +
+                "    // Map of tags\n" +
+                "    val graphIdToTagMap = SparseArray<String>()\n" +
+                "    // Result. Mutable live data with the selected controlled\n" +
+                "    val selectedNavController = MutableLiveData<NavController>()\n" +
+                "\n" +
+                "    var firstFragmentGraphId = 0\n" +
+                "\n" +
+                "    // First create a NavHostFragment for each NavGraph ID\n" +
+                "    navGraphIds.forEachIndexed { index, navGraphId ->\n" +
+                "        val fragmentTag = getFragmentTag(index)\n" +
+                "\n" +
+                "        // Find or create the Navigation host fragment\n" +
+                "        val navHostFragment = obtainNavHostFragment(\n" +
+                "            fragmentManager,\n" +
+                "            fragmentTag,\n" +
+                "            navGraphId,\n" +
+                "            containerId\n" +
+                "        )\n" +
+                "\n" +
+                "        // Obtain its id\n" +
+                "        val graphId = navHostFragment.navController.graph.id\n" +
+                "\n" +
+                "        if (index == 0) {\n" +
+                "            firstFragmentGraphId = graphId\n" +
+                "        }\n" +
+                "\n" +
+                "        // Save to the map\n" +
+                "        graphIdToTagMap[graphId] = fragmentTag\n" +
+                "\n" +
+                "        // Attach or detach nav host fragment depending on whether it's the selected item.\n" +
+                "        if (this.selectedItemId == graphId) {\n" +
+                "            // Update livedata with the selected graph\n" +
+                "            selectedNavController.value = navHostFragment.navController\n" +
+                "            attachNavHostFragment(fragmentManager, navHostFragment, index == 0)\n" +
+                "        } else {\n" +
+                "            detachNavHostFragment(fragmentManager, navHostFragment)\n" +
+                "        }\n" +
                 "    }\n" +
                 "\n" +
-                "    var fragment = manager.findFragmentByTag(tag)\n" +
-                "    if (fragment == null) {\n" +
-                "      val className = destination.className\n" +
-                "      fragment = instantiateFragment(context, manager, className, args)\n" +
-                "      transaction.add(containerId, fragment, tag)\n" +
-                "    } else {\n" +
-                "      transaction.attach(fragment)\n" +
+                "    // Now connect selecting an item with swapping Fragments\n" +
+                "    var selectedItemTag = graphIdToTagMap[this.selectedItemId]\n" +
+                "    val firstFragmentTag = graphIdToTagMap[firstFragmentGraphId]\n" +
+                "    var isOnFirstFragment = selectedItemTag == firstFragmentTag\n" +
+                "\n" +
+                "    // When a navigation item is selected\n" +
+                "    setOnNavigationItemSelectedListener { item ->\n" +
+                "        // Don't do anything if the state is state has already been saved.\n" +
+                "        if (fragmentManager.isStateSaved) {\n" +
+                "            false\n" +
+                "        } else {\n" +
+                "            val newlySelectedItemTag = graphIdToTagMap[item.itemId]\n" +
+                "            if (selectedItemTag != newlySelectedItemTag) {\n" +
+                "                // Pop everything above the first fragment (the \"fixed start destination\")\n" +
+                "                fragmentManager.popBackStack(\n" +
+                "                    firstFragmentTag,\n" +
+                "                    FragmentManager.POP_BACK_STACK_INCLUSIVE\n" +
+                "                )\n" +
+                "                val selectedFragment = fragmentManager.findFragmentByTag(newlySelectedItemTag)\n" +
+                "                        as NavHostFragment\n" +
+                "\n" +
+                "                // Exclude the first fragment tag because it's always in the back stack.\n" +
+                "                if (firstFragmentTag != newlySelectedItemTag) {\n" +
+                "                    // Commit a transaction that cleans the back stack and adds the first fragment\n" +
+                "                    // to it, creating the fixed started destination.\n" +
+                "                    fragmentManager.beginTransaction()\n" +
+                "                        .show(selectedFragment)\n" +
+                "                        .setPrimaryNavigationFragment(selectedFragment)\n" +
+                "                        .apply {\n" +
+                "                            // Detach all other Fragments\n" +
+                "                            graphIdToTagMap.forEach { _, fragmentTagIter ->\n" +
+                "                                if (fragmentTagIter != newlySelectedItemTag) {\n" +
+                "                                    hide(fragmentManager.findFragmentByTag(firstFragmentTag)!!)\n" +
+                "                                }\n" +
+                "                            }\n" +
+                "                        }\n" +
+                "                        .addToBackStack(firstFragmentTag)\n" +
+                "                        .setCustomAnimations(\n" +
+                "                            R.anim.nav_default_enter_anim,\n" +
+                "                            R.anim.nav_default_exit_anim,\n" +
+                "                            R.anim.nav_default_pop_enter_anim,\n" +
+                "                            R.anim.nav_default_pop_exit_anim\n" +
+                "                        )\n" +
+                "                        .setReorderingAllowed(true)\n" +
+                "                        .commit()\n" +
+                "                }\n" +
+                "                selectedItemTag = newlySelectedItemTag\n" +
+                "                isOnFirstFragment = selectedItemTag == firstFragmentTag\n" +
+                "                selectedNavController.value = selectedFragment.navController\n" +
+                "                true\n" +
+                "            } else {\n" +
+                "                false\n" +
+                "            }\n" +
+                "        }\n" +
                 "    }\n" +
                 "\n" +
-                "    transaction.setPrimaryNavigationFragment(fragment)\n" +
-                "    transaction.setReorderingAllowed(true)\n" +
-                "    transaction.commit()\n" +
+                "    // Optional: on item reselected, pop back stack to the destination of the graph\n" +
+                " //   setupItemReselected(graphIdToTagMap, fragmentManager)\n" +
                 "\n" +
-                "    return if (initialNavigate) {\n" +
-                "      // If always return null, selected BottomNavigation item is not same as app:startDestination in first time.\n" +
-                "      destination\n" +
-                "    } else {\n" +
-                "      null\n" +
+                "    // Handle deep link\n" +
+                " //   setupDeepLinks(navGraphIds, fragmentManager, containerId, intent)\n" +
+                "\n" +
+                "    // Finally, ensure that we update our BottomNavigationView when the back stack changes\n" +
+                "    fragmentManager.addOnBackStackChangedListener {\n" +
+                "        if (!isOnFirstFragment && !fragmentManager.isOnBackStack(firstFragmentTag)) {\n" +
+                "            this.selectedItemId = firstFragmentGraphId\n" +
+                "        }\n" +
+                "\n" +
+                "        // Reset the graph if the currentDestination is not valid (happens when the back\n" +
+                "        // stack is popped after using the back button).\n" +
+                "        selectedNavController.value?.let { controller ->\n" +
+                "            if (controller.currentDestination == null) {\n" +
+                "                controller.navigate(controller.graph.id)\n" +
+                "            }\n" +
+                "        }\n" +
                 "    }\n" +
-                "  }\n" +
-                "}"
+                "    return selectedNavController\n" +
+                "}\n" +
+                "\n" +
+                "private fun BottomNavigationView.setupDeepLinks(\n" +
+                "    navGraphIds: List<Int>,\n" +
+                "    fragmentManager: FragmentManager,\n" +
+                "    containerId: Int,\n" +
+                "    intent: Intent\n" +
+                ") {\n" +
+                "    navGraphIds.forEachIndexed { index, navGraphId ->\n" +
+                "        val fragmentTag = getFragmentTag(index)\n" +
+                "\n" +
+                "        // Find or create the Navigation host fragment\n" +
+                "        val navHostFragment = obtainNavHostFragment(\n" +
+                "            fragmentManager,\n" +
+                "            fragmentTag,\n" +
+                "            navGraphId,\n" +
+                "            containerId\n" +
+                "        )\n" +
+                "        // Handle Intent\n" +
+                "        if (navHostFragment.navController.handleDeepLink(intent)) {\n" +
+                "            this.selectedItemId = navHostFragment.navController.graph.id\n" +
+                "        }\n" +
+                "    }\n" +
+                "}\n" +
+                "\n" +
+                "private fun BottomNavigationView.setupItemReselected(\n" +
+                "    graphIdToTagMap: SparseArray<String>,\n" +
+                "    fragmentManager: FragmentManager\n" +
+                ") {\n" +
+                "    setOnNavigationItemReselectedListener { item ->\n" +
+                "        val newlySelectedItemTag = graphIdToTagMap[item.itemId]\n" +
+                "        val selectedFragment = fragmentManager.findFragmentByTag(newlySelectedItemTag)\n" +
+                "                as NavHostFragment\n" +
+                "        val navController = selectedFragment.navController\n" +
+                "        // Pop the back stack to the start destination of the current navController graph\n" +
+                "        navController.popBackStack(\n" +
+                "            navController.graph.startDestination, false\n" +
+                "        )\n" +
+                "    }\n" +
+                "}\n" +
+                "\n" +
+                "private fun detachNavHostFragment(\n" +
+                "    fragmentManager: FragmentManager,\n" +
+                "    navHostFragment: NavHostFragment\n" +
+                ") {\n" +
+                "    fragmentManager.beginTransaction()\n" +
+                "        .hide(navHostFragment)\n" +
+                "        .commitNow()\n" +
+                "}\n" +
+                "\n" +
+                "private fun attachNavHostFragment(\n" +
+                "    fragmentManager: FragmentManager,\n" +
+                "    navHostFragment: NavHostFragment,\n" +
+                "    isPrimaryNavFragment: Boolean\n" +
+                ") {\n" +
+                "    fragmentManager.beginTransaction()\n" +
+                "        .show(navHostFragment)\n" +
+                "        .apply {\n" +
+                "            if (isPrimaryNavFragment) {\n" +
+                "                setPrimaryNavigationFragment(navHostFragment)\n" +
+                "            }\n" +
+                "        }\n" +
+                "        .commitNow()\n" +
+                "\n" +
+                "}\n" +
+                "\n" +
+                "private fun obtainNavHostFragment(\n" +
+                "    fragmentManager: FragmentManager,\n" +
+                "    fragmentTag: String,\n" +
+                "    navGraphId: Int,\n" +
+                "    containerId: Int\n" +
+                "): NavHostFragment {\n" +
+                "    // If the Nav Host fragment exists, return it\n" +
+                "    val existingFragment = fragmentManager.findFragmentByTag(fragmentTag) as NavHostFragment?\n" +
+                "    existingFragment?.let { return it }\n" +
+                "\n" +
+                "    // Otherwise, create it and return it.\n" +
+                "    val navHostFragment = NavHostFragment.create(navGraphId)\n" +
+                "    fragmentManager.beginTransaction()\n" +
+                "        .add(containerId, navHostFragment, fragmentTag)\n" +
+                "        .commitNow()\n" +
+                "    return navHostFragment\n" +
+                "}\n" +
+                "\n" +
+                "private fun FragmentManager.isOnBackStack(backStackName: String): Boolean {\n" +
+                "    val backStackCount = backStackEntryCount\n" +
+                "    for (index in 0 until backStackCount) {\n" +
+                "        if (getBackStackEntryAt(index).name == backStackName) {\n" +
+                "            return true\n" +
+                "        }\n" +
+                "    }\n" +
+                "    return false\n" +
+                "}\n" +
+                "\n" +
+                "private fun getFragmentTag(index: Int) = \"bottomNavigation#\$index\""
     )
 
     class MainModule(packageName: String) : FileType(
         "MainModule.kt",
         "package $packageName.di\n" +
                 "\n" +
-                "import $packageName.utils.common.ImageBindingAdapter\n" +
+                "import $packageName.common.GlideImageLoader\n" +
+                "import $packageName.common.ImageBindingAdapter\n" +
+                "import $packageName.common.ImageLoader\n" +
                 "import org.koin.dsl.module.module\n" +
                 "import org.koin.standalone.KoinComponent\n" +
                 "import org.koin.standalone.inject\n" +
                 "\n" +
                 "val mainModule = module {\n" +
                 "\n" +
+                "  single<ImageLoader> { GlideImageLoader }\n" +
+                "  single { ImageBindingAdapter(get()) }\n" +
                 "}\n" +
                 "\n" +
                 "class BindingComponent : androidx.databinding.DataBindingComponent, KoinComponent {\n" +
@@ -91,8 +273,8 @@ sealed class FileType(val fileName: String, val content: String) {
                 "import android.view.View\n" +
                 "import android.view.ViewGroup\n" +
                 "import androidx.lifecycle.Observer\n" +
-                "import $userPackage.utils.common.BaseFragment\n" +
-                "import $userPackage.utils.common.BaseView\n" +
+                "import $userPackage.common.BaseFragment\n" +
+                "import $userPackage.common.BaseView\n" +
                 "import $userPackage.R\n" +
                 "import $userPackage.databinding.Fragment${fileName}Binding\n" +
                 "import $packageName.${fileName}StateIntent.GetSampleData\n" +
@@ -145,10 +327,10 @@ sealed class FileType(val fileName: String, val content: String) {
         "${fileName}ViewModel.kt",
         "package $packageName\n" +
                 "\n" +
-                "import $userPackage.utils.common.BaseViewModel\n" +
-                "import $userPackage.utils.common.startWithAndErrHandleWithIO\n" +
-                "import $packageName.${fileName}StateChange.*" +
-                "import $packageName.${fileName}StateIntent.*" +
+                "import $userPackage.common.BaseViewModel\n" +
+                "import $userPackage.common.startWithAndErrHandleWithIO\n" +
+                "import $packageName.${fileName}StateChange.*\n" +
+                "import $packageName.${fileName}StateIntent.*\n" +
                 "import io.reactivex.Observable\n" +
                 "\n" +
                 "class ${fileName}ViewModel() : BaseViewModel<${fileName}State>() {\n" +
@@ -157,11 +339,12 @@ sealed class FileType(val fileName: String, val content: String) {
                 "\n" +
                 "  override fun viewIntents(intentStream: Observable<*>): Observable<Any> = \n" +
                 "    Observable.merge(\n" +
-                "      listOf(" +
+                "      listOf(\n" +
                 "           intentStream.ofType(GetSampleData::class.java)\n" +
                 "                    .map { Success }\n" +
-                "                    .startWithAndErrHandleWithIO(Loading) { Observable.just(Error(it), HideError) })\n" +
-                "    )" +
+                "                    .startWithAndErrHandleWithIO(Loading) { Observable.just(Error(it), HideError) }\n" +
+                "       )\n" +
+                "    )\n" +
                 "\n" +
                 "  override fun reduceState(previousState: ${fileName}State, stateChange: Any): ${fileName}State = \n" +
                 "  when (stateChange) {\n" +
@@ -272,10 +455,10 @@ sealed class FileType(val fileName: String, val content: String) {
                 "  fun getAll(): Flowable<List<EntityL>>\n" +
                 "\n" +
                 "  @Insert(onConflict = OnConflictStrategy.REPLACE)\n" +
-                "  fun insert(cat: EntityL): Long\n" +
+                "  fun insert(entity: EntityL): Long\n" +
                 "\n" +
                 "  @Insert(onConflict = OnConflictStrategy.REPLACE)\n" +
-                "  fun insertAll(catList: List<EntityL>): List<Long>\n" +
+                "  fun insertAll(entityList: List<EntityL>): List<Long>\n" +
                 "\n" +
                 "  @Query(\"DELETE FROM EntityL\")\n" +
                 "  fun deleteAll(): Int\n" +
@@ -295,7 +478,6 @@ sealed class FileType(val fileName: String, val content: String) {
                 "import $packageName.domain.datasource.EntityDataSource\n" +
                 "import $packageName.domain.entity.Entity\n" +
                 "import $packageName.domain.repository.EntitiesRepository\n" +
-                "import io.reactivex.Completable\n" +
                 "import io.reactivex.Observable\n" +
                 "\n" +
                 "class EntitiesRepositoryImpl(\n" +
@@ -356,10 +538,8 @@ sealed class FileType(val fileName: String, val content: String) {
         "package $packageName.data.remote.datasource\n" +
                 "\n" +
                 "import $packageName.data.remote.api.${projectName}Api\n" +
-//                    "import com.gis.repoimpl.data.remote.entity.CatR\n" +
                 "import $packageName.domain.datasource.EntityDataSource\n" +
                 "import $packageName.domain.entity.Entity\n" +
-                "import io.reactivex.Completable\n" +
                 "import io.reactivex.Observable\n" +
                 "\n" +
                 "class EntityRemoteSource(private val api: ${projectName}Api) : EntityDataSource {\n" +
@@ -378,7 +558,6 @@ sealed class FileType(val fileName: String, val content: String) {
                 "import $packageName.data.local.entity.EntityL\n" +
                 "import $packageName.domain.datasource.EntityDataSource\n" +
                 "import $packageName.domain.entity.Entity\n" +
-                "import io.reactivex.Completable\n" +
                 "import io.reactivex.Observable\n" +
                 "\n" +
                 "class EntityLocalSource(private val entityDao: EntityDao) : EntityDataSource {\n" +
@@ -468,14 +647,13 @@ sealed class FileType(val fileName: String, val content: String) {
                 "\n" +
                 "val repoModule = module {\n" +
                 "\n" +
-                "  single { ${projectName}DbProvider.createDb(androidContext()).entityDao() }\n" +
+                "  single { ${projectName}DbProvider.getInstance(androidContext()).entityDao() }\n" +
                 "\n" +
                 "  single { ${projectName}ApiProvider.createApi() }\n" +
                 "\n" +
-                "  single { androidContext().getSharedPreferences(\"sharedPrefs\", MODE_PRIVATE) }" +
+                "  single { androidContext().getSharedPreferences(\"sharedPrefs\", MODE_PRIVATE) }\n" +
                 "\n" +
                 "  single<EntityDataSource>(\"local\") { EntityLocalSource(get()) }\n" +
-                "\n" +
                 "  single<EntityDataSource>(\"remote\") { EntityRemoteSource(get()) }\n" +
                 "\n" +
                 "  single<EntitiesRepository> { EntitiesRepositoryImpl(get(\"local\"), get(\"remote\")) }\n" +
@@ -533,26 +711,29 @@ sealed class FileType(val fileName: String, val content: String) {
                 "}"
     )
 
-
     class DbProvider(projectName: String, packageName: String) : FileType(
         "${projectName}DbProvider.kt",
         "package $packageName.data.local.db\n" +
-
                 "\n" +
                 "import android.content.Context\n" +
                 "import androidx.room.Room\n" +
                 "\n" +
                 "class ${projectName}DbProvider {\n" +
-                "\n" +
                 "  companion object {\n" +
-                "    fun createDb(context: Context): ${projectName}Db {\n" +
-                "      return Room.databaseBuilder(context, ${projectName}Db::class.java, \"${projectName}Database\")\n" +
+                "\n" +
+                "    @Volatile private var INSTANCE: ${projectName}Db? = null\n" +
+                "\n" +
+                "    fun getInstance(context: Context): ${projectName}Db =\n" +
+                "      INSTANCE ?: synchronized(this) {\n" +
+                "        INSTANCE ?: buildDatabase(context).also { INSTANCE = it }\n" +
+                "      }\n" +
+                "\n" +
+                "    private fun buildDatabase(context: Context) =\n" +
+                "      Room.databaseBuilder(context, ${projectName}Db::class.java, \"${projectName}Database\")\n" +
                 "        .build()\n" +
-                "    }\n" +
-                "  }\n" +
+                "  }" +
                 "}"
     )
-
 
     class Database(projectName: String, packageName: String) : FileType(
         "${projectName}Db.kt",
@@ -671,8 +852,6 @@ sealed class FileType(val fileName: String, val content: String) {
                 "import com.bumptech.glide.load.resource.bitmap.RoundedCorners\n" +
                 "import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions\n" +
                 "import com.bumptech.glide.request.RequestOptions\n" +
-                "import $packageName.common.px\n" +
-                "import $packageName.common.ImageLoader\n" +
                 "import java.util.ArrayList\n" +
                 "\n" +
                 "object GlideImageLoader : ImageLoader {\n" +
@@ -737,12 +916,19 @@ sealed class FileType(val fileName: String, val content: String) {
         "package $packageName.common\n" +
                 "\n" +
                 "import android.content.res.Resources\n" +
+
                 "import android.view.animation.OvershootInterpolator\n" +
                 "import android.widget.ImageView\n" +
+                "import android.widget.TextView\n" +
                 "import androidx.annotation.DrawableRes\n" +
+                "import com.jakewharton.rxbinding2.widget.TextViewAfterTextChangeEvent\n" +
+                "import com.jakewharton.rxbinding2.widget.afterTextChangeEvents\n" +
                 "import io.reactivex.Observable\n" +
+                "import io.reactivex.ObservableTransformer\n" +
                 "import io.reactivex.android.schedulers.AndroidSchedulers\n" +
                 "import io.reactivex.schedulers.Schedulers\n" +
+                "import java.util.concurrent.TimeUnit.MILLISECONDS\n" +
+                "import kotlin.LazyThreadSafetyMode.NONE" +
                 "\n" +
                 "val Int.px: Int get() = (this * Resources.getSystem().displayMetrics.density).toInt()\n" +
                 "val Int.dp: Int get() = (this / Resources.getSystem().displayMetrics.density).toInt()\n" +
@@ -774,23 +960,19 @@ sealed class FileType(val fileName: String, val content: String) {
                 "  this.cast(Any::class.java)\n" +
                 "    .onErrorResumeNext(errorHandler)\n" +
                 "    .subscribeOn(Schedulers.io())\n" +
-                "    .observeOn(AndroidSchedulers.mainThread())"
-    )
-
-    class UtilsModule(packageName: String) : FileType(
-        "UtilsModule.kt",
-        "package $packageName.di\n" +
+                "    .observeOn(AndroidSchedulers.mainThread())\n" +
                 "\n" +
-                "import $packageName.common.GlideImageLoader\n" +
-                "import $packageName.common.ImageLoader\n" +
-                "import $packageName.common.ImageBindingAdapter\n" +
-                "import org.koin.dsl.module.module\n" +
+                "val editTextAfterTextChangeTransformer by lazy(NONE) {\n" +
+                "  ObservableTransformer<TextViewAfterTextChangeEvent, String> {\n" +
+                "    it.skip(1)\n" +
+                "      .map { it.editable().toString() }\n" +
+                "      .distinctUntilChanged()\n" +
+                "      .debounce(350, MILLISECONDS)\n" +
+                "  }\n" +
+                "}\n" +
                 "\n" +
-                "val utilsModule = module {\n" +
-                "\n" +
-                "  single<ImageLoader> { GlideImageLoader }\n" +
-                "  single { ImageBindingAdapter(get()) }\n" +
-                "}"
+                "inline fun <T> TextView.debouncedAfterTextChanges(noinline mapper: (String) -> T): Observable<T> =\n" +
+                "  afterTextChangeEvents().compose(editTextAfterTextChangeTransformer).map(mapper)"
     )
 
     class BaseComponents(packageName: String) : FileType(
@@ -898,29 +1080,6 @@ sealed class FileType(val fileName: String, val content: String) {
         "<manifest package=\"$packageName\"/>"
     )
 
-    class BuildSrc : FileType(
-        "build.gradle.kts",
-        "import org.jetbrains.kotlin.gradle.tasks.KotlinCompile\n" +
-                "\n" +
-                "plugins {\n" +
-                "    `kotlin-dsl`\n" +
-                "}\n" +
-                "dependencies {\n" +
-                "    compile(kotlin(\"stdlib-jdk8\"))\n" +
-                "}\n" +
-                "repositories {\n" +
-                "    mavenCentral()\n" +
-                "}\n" +
-                "val compileKotlin: KotlinCompile by tasks\n" +
-                "compileKotlin.kotlinOptions {\n" +
-                "    jvmTarget = \"1.8\"\n" +
-                "}\n" +
-                "val compileTestKotlin: KotlinCompile by tasks\n" +
-                "compileTestKotlin.kotlinOptions {\n" +
-                "    jvmTarget = \"1.8\"\n" +
-                "}"
-    )
-
     class Proguard : FileType(
         "proguard-rules.pro",
         "# Add project specific ProGuard rules here.\n" +
@@ -946,68 +1105,313 @@ sealed class FileType(val fileName: String, val content: String) {
                 "#-renamesourcefileattribute SourceFile"
     )
 
+    class DepsBuildGradle() : FileType(
+        "dependencies.gradle",
+    "ext {\n" +
+            "    sourceCompatibility = JavaVersion.VERSION_1_8\n" +
+            "    targetCompatibility = JavaVersion.VERSION_1_8\n" +
+            "\n" +
+            "   versionMajor = 0\n" +
+            "   versionMinor = 0\n" +
+            "   versionPatch = 1\n" +
+            "   versionClassifier = \"\"\n" +
 
-    class UtilsBuildGradle : FileType(
-        "build.gradle",
-        "apply plugin: 'com.android.library'\n" +
-                "apply plugin: 'kotlin-android-extensions'\n" +
-                "apply plugin: 'kotlin-android'\n" +
-                "apply plugin: \"kotlin-kapt\"\n" +
-                "\n" +
-                "android {\n" +
-                "    compileSdkVersion 28\n" +
-                "\n" +
-                "\n" +
-                "    defaultConfig {\n" +
-                "        minSdkVersion 21\n" +
-                "        targetSdkVersion 28\n" +
-                "        versionCode 1\n" +
-                "        versionName \"1.0\"\n" +
-                "\n" +
-                "        testInstrumentationRunner \"android.support.test.runner.AndroidJUnitRunner\"\n" +
-                "\n" +
-                "    }\n" +
-                "\n" +
-                "    buildTypes {\n" +
-                "        debug {\n" +
-                "           minifyEnabled false\n" +
-                "        }\n" +
-                "        release {\n" +
-                "            minifyEnabled true\n" +
-                "            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'\n" +
-                "        }\n" +
-                "    }\n" +
-                "\n" +
-                "    dataBinding {\n" +
-                "        enabled = true\n" +
-                "    }\n" +
-                "}\n" +
-                "\n" +
-                "dependencies {\n" +
-                "    implementation fileTree(dir: 'libs', include: ['*.jar'])\n" +
-                "\n" +
-                "    implementation Deps.kotlinStdlib\n" +
-                "    implementation Deps.appCompat\n" +
-                "\n" +
-                "    implementation Deps.rxJava\n" +
-                "    implementation Deps.rxRelay\n" +
-                "    implementation Deps.rxKotlin\n" +
-                "    implementation Deps.rxAndroid\n" +
-                "\n" +
-                "    implementation Deps.glide\n" +
-                "    kapt Deps.glideCompiler\n" +
-                "\n" +
-                "    implementation Deps.koinCore\n" +
-                "    implementation Deps.koinAndroid\n" +
-                "    implementation Deps.koinCoreScope\n" +
-                "\n" +
-                "    testImplementation Deps.jUnit\n" +
-                "    androidTestImplementation Deps.androidTestRunner\n" +
-                "    androidTestImplementation Deps.espresso\n" +
-                "}\n" +
-                "repositories {\n" +
-                "    mavenCentral()\n" +
-                "}\n"
+            "    // project\n" +
+            "    minSdk = 22\n" +
+            "    targetSdk = 28\n" +
+            "    buildToolsVersion = \"28.0.2\"\n" +
+            "    compileSdk = 28\n" +
+            "    androidGradle = \"3.4.0-beta03\"\n" +
+            "\n" +
+            "    // android\n" +
+            "    androidXV = \"1.0.0\"\n" +
+            "    androidKtxV = \"1.0.0-rc02\"   //https://github.com/android/android-ktx\n" +
+            "    androidLifecycleV = \"2.0.0-alpha1\"\n" +
+            "    multidexV = \"2.0.0\"\n" +
+            "    constraintLayoutV = \"2.0.0-alpha2\"\n" +
+            "    workersV = \"2.0.1\"\n" +
+            "\n" +
+            "    // kotlin\n" +
+            "    kotlinV = \"1.3.10\" // https://kotlinlang.org/\n" +
+            "    coroutinesAndroidV = \"1.2.0-alpha-2\" // https://kotlinlang.org/\n" +
+            "    coroutinesCoreV = \"1.2.0-alpha-2\" // https://kotlinlang.org/\n" +
+            "\n" +
+            "    //rxExtensions\n" +
+            "    rxJavaV = \"2.2.0\"            //https://github.com/ReactiveX/RxJava\n" +
+            "    rxRelayV = \"2.0.0\"           //https://github.com/JakeWharton/RxRelay\n" +
+            "    rxKotlinV = \"2.2.0\"          //https://github.com/ReactiveX/RxKotlin\n" +
+            "    rxAndroidV = \"2.1.0\"         //https://github.com/ReactiveX/RxAndroid\n" +
+            "    rxBindingV = \"2.1.1\"         //https://github.com/JakeWharton/RxBinding\n" +
+            "    rxBinding3V = \"3.0.0-alpha1\"         //https://github.com/JakeWharton/RxBinding\n" +
+            "    rxNetworkV = \"2.1.0\"         //https://github.com/pwittchen/ReactiveNetwork\n" +
+            "    rxPermissionsV = \"0.10.2\"    //https://github.com/tbruyelle/RxPermissions\n" +
+            "\n" +
+            "    // dependency injection\n" +
+            "    daggerV = \"2.17\" //https://github.com/google/dagger\n" +
+            "    koinV = \"1.0.1\"  //https://github.com/InsertKoinIO/koin\n" +
+            "\n" +
+            "    // general\n" +
+            "    mosbyV = \"3.1.0\" //https://github.com/sockeqwe/mosby\n" +
+            "\n" +
+            "    //pdf\n" +
+            "    pdfViewV = \"3.1.0-beta.1\"\n" +
+            "\n" +
+            "    // network\n" +
+            "    okHttpV = \"3.11.0\" //https://github.com/square/okhttp\n" +
+            "\n" +
+            "    // serialization\n" +
+            "    gsonV = \"2.8.5\"        //https://github.com/google/gson\n" +
+            "    loganSquareV = \"1.3.7\" //https://github.com/bluelinelabs/LoganSquare\n" +
+            "    jacksonCoreV = \"2.9.7\" //https://github.com/bluelinelabs/LoganSquare\n" +
+            "\n" +
+            "    // retrofit\n" +
+            "    retrofitV = \"2.4.0\"                     //https://github.com/square/retrofit\n" +
+            "    retrofitConverterGsonV =\n" +
+            "            \"2.4.0\"        //https://github.com/square/retrofit/tree/master/retrofit-converters/gson\n" +
+            "    retrofitConverterLoganSquareV = \"1.4.1\" //https://github.com/mannodermaus/retrofit-logansquare\n" +
+            "\n" +
+            "    // apollo\n" +
+            "    apolloV = \"1.0.0-alpha\"      // https://github.com/apollographql/apollo-android\n" +
+            "\n" +
+            "    //persistence\n" +
+            "    roomV = \"2.1.0-alpha06\" //https://developer.android.com/topic/libraries/architecture/room\n" +
+            "\n" +
+            "    //lifecycle\n" +
+            "    lifecycleV = \"2.0.0-rc01\" //https://developer.android.com/topic/libraries/architecture/lifecycle\n" +
+            "    viewmodelKTXV = \"2.1.0-alpha04\" //https://developer.android.com/topic/libraries/architecture/lifecycle\n" +
+            "    lifecycleReactiveStreamsV = \"2.0.0\" //https://developer.android.com/topic/libraries/architecture/lifecycle\n" +
+            "\n" +
+            "    //navigation\n" +
+            "    navigationV = \"2.1.0-alpha01\" //https://developer.android.com/topic/libraries/architecture/navigation\n" +
+            "\n" +
+            "    //imageLoading\n" +
+            "    glideV = \"4.8.0\"  //https://github.comalpha07/bumptech/glide\n" +
+            "    picassoV = \"2.71828\"       //https://github.com/square/picasso\n" +
+            "\n" +
+            "    //profiling\n" +
+            "    debugDbV = \"1.0.4\"    //https://github.com/amitshekhariitbhu/Android-Debug-Database\n" +
+            "    leakCanaryV = \"1.6.2\" //https://github.com/square/leakcanary\n" +
+            "\n" +
+            "    //social auth\n" +
+            "    facebookAnalyticsV = \"[4,5)\"\n" +
+            "    crashlyticsV = \"2.9.4@aar\"\n" +
+            "    fabricPluginV = \"1.+\"\n" +
+            "    simpleAuthV = \"2.1.3\"  //https://github.com/jaychang0917/SimpleAuth\n" +
+            "\n" +
+            "    // firebase\n" +
+            "    firebaseCoreV = \"16.0.1\"\n" +
+            "    firebaseMessagingV = \"17.1.0\"\n" +
+            "\n" +
+            "    //Google\n" +
+            "    googleServicesV = \"4.0.1\"\n" +
+            "    googleAuthV = \"16.0.0\"\n" +
+            "    googleMapsV = \"16.0.0\"\n" +
+            "    googleLocationV = \"16.0.0\"\n" +
+            "\n" +
+            "    // tests\n" +
+            "    jUnitV = \"4.12\"\n" +
+            "    androidTestRunnerV = \"1.0.0-rc01\"\n" +
+            "    espressoV = \"3.1.0-alpha4\"\n" +
+            "    mockitoV = \"2.22.0\"\n" +
+            "    mockitoAndroidV = \"2.22.0\"\n" +
+            "    mockitoKotlinV = \"2.0.0-RC1\"\n" +
+            "\n" +
+            "    //ImageProcessing\n" +
+            "    gpuImageV = \"2.0.3\"\n" +
+            "    exifinterfaceV = \"1.0.0\"\n" +
+            "    compressorV = \"2.1.0\"\n" +
+            "\n" +
+            "    //Camera\n" +
+            "    cameraViewV = \"2.0.0-beta03\"\n" +
+            "    //Billing\n" +
+            "    billingV = \"1.2.1\"\n" +
+            "    skeletonV = \"1.1.2\"\n" +
+            "    shimmerlayoutV = \"2.1.0\"\n" +
+            "\n" +
+            "    exoplayerCoreV = \"2.9.6\"\n" +
+            "    exoplayerDashV = \"2.9.6\"\n" +
+            "    exoplayerUiV = \"2.9.6\"\n" +
+            "\n" +
+            "    dashedCircularProgressV = \"1.4\"\n" +
+            "\n" +
+            "    customTabsV = \"23.3.0\"\n" +
+            "\n" +
+            "    // Android\n" +
+            "    androidCore = \"androidx.core:core:\${androidXV}\"\n" +
+            "    androidAnnotation = \"androidx.annotation:annotation:\${androidXV}\"\n" +
+            "    androidLifecycle = \"androidx.lifecycle:lifecycle-runtime:\${androidLifecycleV}\"\n" +
+            "    appCompat = \"androidx.appcompat:appcompat:\${androidXV}\"\n" +
+            "    material = \"com.google.android.material:material:\${androidXV}\"\n" +
+            "    palette = \"androidx.palette:palette:\${androidXV}\"\n" +
+            "    constraintLayout = \"androidx.constraintlayout:constraintlayout:\${constraintLayoutV}\"\n" +
+            "    cardview = \"androidx.cardview:cardview:\${androidXV}\"\n" +
+            "    multidex = \"androidx.multidex:multidex:\${multidexV}\"\n" +
+            "    animatedVector = \"androidx.vectordrawable:vectordrawable-animated:\${androidXV}\"\n" +
+            "    workersKtx = \"androidx.work:work-runtime-ktx:\${workersV}\"\n" +
+            "\n" +
+            "    androidKtx = \"androidx.core:core-ktx:\${androidKtxV}\"\n" +
+            "    paletteKtx = \"androidx.palette:palette-ktx:\${androidKtxV}\"\n" +
+            "    fragmentKtx = \"androidx.fragment:fragment-ktx:\${androidKtxV}\"\n" +
+            "    collectionKtx = \"androidx.collection:collection-ktx:\${androidKtxV}\"\n" +
+            "\n" +
+            "    // Kotlin\n" +
+            "    kotlinStdlib = \"org.jetbrains.kotlin:kotlin-stdlib-jdk7:\${kotlinV}\"\n" +
+            "\n" +
+            "    // Coroutines\n" +
+            "    coroutinesCore = \"org.jetbrains.kotlinx:kotlinx-coroutines-core:\${coroutinesCoreV}\"\n" +
+            "    coroutinesAndroid = \"org.jetbrains.kotlinx:kotlinx-coroutines-core:\${coroutinesAndroidV}\"\n" +
+            "\n" +
+            "    // RxExtension\n" +
+            "    rxJava = \"io.reactivex.rxjava2:rxjava:\${rxJavaV}\"\n" +
+            "    rxRelay = \"com.jakewharton.rxrelay2:rxrelay:\${rxRelayV}\"\n" +
+            "    rxKotlin = \"io.reactivex.rxjava2:rxkotlin:\${rxKotlinV}\"\n" +
+            "    rxAndroid = \"io.reactivex.rxjava2:rxandroid:\${rxAndroidV}\"\n" +
+            "\n" +
+            "    rxBinding = \"com.jakewharton.rxbinding3:rxbinding:\${rxBinding3V}\"\n" +
+            "    rxBindingCore = \"com.jakewharton.rxbinding3:rxbinding-core:\${rxBinding3V}\"\n" +
+            "    rxBindingAppCompat = \"com.jakewharton.rxbinding3:rxbinding-appcompat:\${rxBinding3V}\"\n" +
+            "    rxBindingDrawer = \"com.jakewharton.rxbinding3:rxbinding-drawerlayout:\${rxBinding3V}\"\n" +
+            "    rxBindingLeanBack = \"com.jakewharton.rxbinding3:rxbinding-leanback:\${rxBinding3V}\"\n" +
+            "    rxBindingRecyclerView = \"com.jakewharton.rxbinding3:rxbinding-recyclerview:\${rxBinding3V}\"\n" +
+            "    rxBindingSlidingPanel = \"com.jakewharton.rxbinding3:rxbinding-slidingpanelayout:\${rxBinding3V}\"\n" +
+            "    rxBindingSwipeRefresh = \"com.jakewharton.rxbinding3:rxbinding-swiperefreshlayout:\${rxBinding3V}\"\n" +
+            "    rxBindingViewPager = \"com.jakewharton.rxbinding3:rxbinding-viewpager:\${rxBinding3V}\"\n" +
+            "    rxBindingDesign = \"com.jakewharton.rxbinding3:rxbinding-material:\${rxBinding3V}\"\n" +
+            "\n" +
+            "    rxNetwork = \"com.github.pwittchen:reactivenetwork-rx2:\${rxNetworkV}\"\n" +
+            "    rxPermissions = \"com.github.tbruyelle:rxpermissions:\${rxPermissionsV}\"\n" +
+            "    rxBindingKotlin = \"com.jakewharton.rxbinding2:rxbinding-kotlin:\${rxBindingV}\"\n" +
+            "    rxBindingDesignKotlin = \"com.jakewharton.rxbinding2:rxbinding-design-kotlin:\${rxBindingV}\"\n" +
+            "    rxBindingAppCompatV4Kotlin = \"com.jakewharton.rxbinding2:rxbinding-support-v4-kotlin:\${rxBindingV}\"\n" +
+            "    rxBindingAppCompatV7Kotlin = \"com.jakewharton.rxbinding2:rxbinding-appcompat-v7:\${rxBindingV}\"\n" +
+            "    rxBindingRecyclerViewV7Kotlin =\n" +
+            "            \"com.jakewharton.rxbinding2:rxbinding-recyclerview-v7-kotlin:\${rxBindingV}\"\n" +
+            "\n" +
+            "    // Dependency Injection\n" +
+            "    inject = \"javax.inject:javax.inject:1\"\n" +
+            "    dagger = \"com.google.dagger:dagger:\${daggerV}\"\n" +
+            "    daggerCompiler = \"com.google.dagger:dagger-compiler:\${daggerV}\"\n" +
+            "    koinCore = \"org.koin:koin-core:\${koinV}\"\n" +
+            "    koinAndroid = \"org.koin:koin-android:\${koinV}\"\n" +
+            "    koinCoreScope = \"org.koin:koin-androidx-scope:\${koinV}\"\n" +
+            "    koinAndroidViewModel = \"org.koin:koin-androidx-viewmodel:\${koinV}\"\n" +
+            "    koinTests = \"org.koin:koin-test:\${koinV}\"\n" +
+            "\n" +
+            "    // General\n" +
+            "    mosby = \"com.hannesdorfmann.mosby3:mvi:\${mosbyV}\"\n" +
+            "\n" +
+            "    //PDF\n" +
+            "    pdfView = \"com.github.barteksc:android-pdf-viewer:\${pdfViewV}\"\n" +
+            "\n" +
+            "    // Network\n" +
+            "    okHttp = \"com.squareup.okhttp3:okhttp:\${okHttpV}\"\n" +
+            "    okHttpInteceptor = \"com.squareup.okhttp3:logging-interceptor:\${okHttpV}\"\n" +
+            "\n" +
+            "    // Retrofit\n" +
+            "    retrofit = \"com.squareup.retrofit2:retrofit:\${retrofitV}\"\n" +
+            "    retrofitRxJavaAdapter = \"com.squareup.retrofit2:adapter-rxjava2:\${retrofitV}\"\n" +
+            "    retrofitConverterGson = \"com.squareup.retrofit2:converter-gson:\${retrofitConverterGsonV}\"\n" +
+            "    retrofitConverterLoganSquare =\n" +
+            "            \"com.github.aurae.retrofit2:converter-logansquare:\${retrofitConverterLoganSquareV}\"\n" +
+            "\n" +
+            "    // Apollo\n" +
+            "    apollo = \"com.apollographql.apollo:apollo-runtime:\${apolloV}\"\n" +
+            "    apolloAndroidSupport = \"com.apollographql.apollo:apollo-android-support:\${apolloV}\"\n" +
+            "    apolloRxJavaSupport = \"com.apollographql.apollo:apollo-rx2-support:\${apolloV}\"\n" +
+            "\n" +
+            "    // Serialization\n" +
+            "    gson = \"com.google.code.gson:gson:\${gsonV}\"\n" +
+            "    loganSquare = \"com.bluelinelabs:logansquare:\${loganSquareV}\"\n" +
+            "    loganSquareCompiler = \"com.bluelinelabs:logansquare-compiler:\${loganSquareV}\"\n" +
+            "    jacksonCore = \"com.fasterxml.jackson.core:jackson-core:\${loganSquareV}\"\n" +
+            "\n" +
+            "    // Persistence\n" +
+            "    room = \"androidx.room:room-runtime:\${roomV}\"\n" +
+            "    roomCompiler = \"androidx.room:room-compiler:\${roomV}\"\n" +
+            "    rxRoom = \"androidx.room:room-rxjava2:\${roomV}\"\n" +
+            "\n" +
+            "    // Lifecycle\n" +
+            "    lifecycle = \"androidx.lifecycle:lifecycle-extensions:\${lifecycleV}\"\n" +
+            "    viewmodelKTX = \"androidx.lifecycle:lifecycle-viewmodel-ktx:\${viewmodelKTXV}\"\n" +
+            "    lifecycleReactiveStreams = \"androidx.lifecycle:lifecycle-reactivestreams-ktx:\${lifecycleReactiveStreamsV}\"\n" +
+            "\n" +
+            "    // Navigation\n" +
+            "\n" +
+            "    navigationRuntime = \"androidx.navigation:navigation-runtime:\${navigationV}\"\n" +
+            "    navigationRuntime_KTX = \"androidx.navigation:navigation-runtime-ktx:\${navigationV}\"\n" +
+            "    navigationFragment = \"androidx.navigation:navigation-fragment:\${navigationV}\"\n" +
+            "    navigationFragment_KTX = \"androidx.navigation:navigation-fragment-ktx:\${navigationV}\"\n" +
+            "    navigationUI = \"androidx.navigation:navigation-ui:\${navigationV}\"\n" +
+            "    navigationUI_KTX = \"androidx.navigation:navigation-ui-ktx:\${navigationV}\"\n" +
+            "    navigationSafeArgsPlugin = \"androidx.navigation:navigation-safe-args-gradle-plugin:\${navigationV}\"\n" +
+            "\n" +
+            "    // ImageLoading\n" +
+            "    glide = \"com.github.bumptech.glide:glide:\${glideV}\"\n" +
+            "    glideCompiler = \"com.github.bumptech.glide:compiler:\${glideV}\"\n" +
+            "    glideOkHttp3 = \"com.github.bumptech.glide:okhttp3-integration:\${glideV}\"\n" +
+            "    picasso = \"com.squareup.picasso:picasso:\${picassoV}\"\n" +
+            "\n" +
+            "    // Profiling\n" +
+            "    debugDb = \"com.amitshekhar.android:debug-db:\${debugDbV}\"\n" +
+            "    leakCanaryDebug = \"com.squareup.leakcanary:leakcanary-android:\${leakCanaryV}\"\n" +
+            "    leakCanaryRelease = \"com.squareup.leakcanary:leakcanary-android-no-op:\${leakCanaryV}\"\n" +
+            "    leakCanaryFragment = \"com.squareup.leakcanary:leakcanary-support-fragment:\${leakCanaryV}\"\n" +
+            "\n" +
+            "    // Social auth\n" +
+            "    googleAuth = \"com.google.android.gms:play-services-auth:\${googleAuthV}\"\n" +
+            "    socialAuth = \"com.jaychang:simpleauth:\${simpleAuthV}\"\n" +
+            "    socialAuthFacebook = \"com.jaychang:simpleauth-facebook:\${simpleAuthV}\"\n" +
+            "    socialAuthGoogle = \"com.jaychang:simpleauth-google:\${simpleAuthV}\"\n" +
+            "    socialAuthInstagram = \"com.jaychang:simpleauth-instagram:\${simpleAuthV}\"\n" +
+            "    socialAuthTwitter = \"com.jaychang:simpleauth-twitter:\${simpleAuthV}\"\n" +
+            "\n" +
+            "    // Facebook\n" +
+            "    facebookAnalytics = \"com.facebook.android:facebook-android-sdk:\${facebookAnalyticsV}\"\n" +
+            "\n" +
+            "    // Fabric\n" +
+            "    fabricPlugin = \"io.fabric.tools:gradle:\${fabricPluginV}\"\n" +
+            "    crashlytics = \"com.crashlytics.sdk.android:crashlytics:\${crashlyticsV}\"\n" +
+            "\n" +
+            "    // Firebase\n" +
+            "    firebaseCore = \"com.google.firebase:firebase-core:\${firebaseCoreV}\"\n" +
+            "    firebaseMessaging = \"com.google.firebase:firebase-messaging:\${firebaseMessagingV}\"\n" +
+            "\n" +
+            "    //Maps\n" +
+            "    googleMaps = \"com.google.android.gms:play-services-maps:\${googleMapsV}\"\n" +
+            "    googleLocation = \"com.google.android.gms:play-services-location:\${googleLocationV}\"\n" +
+            "\n" +
+            "    // Tests\n" +
+            "    jUnit = \"junit:junit:\${jUnitV}\"\n" +
+            "    mockito = \"org.mockito:mockito-core:\${mockitoV}\"\n" +
+            "    mockitoKotlin = \"com.nhaarman.mockitokotlin2:mockito-kotlin:\${mockitoKotlinV}\"\n" +
+            "    mockitoAndroid = \"org.mockito:mockito-android:\${mockitoAndroidV}\"\n" +
+            "    mockitoInline = \"org.mockito:mockito-inline:+\"\n" +
+            "    androidTestRunner = \"androidx.test:runner:\${androidTestRunnerV}\"\n" +
+            "    espresso = \"androidx.test.espresso:espresso-core:\${espressoV}\"\n" +
+            "\n" +
+            "    //ImageProcessing\n" +
+            "    gpuImage = \"jp.co.cyberagent.android:gpuimage:\${gpuImageV}\"\n" +
+            "    exifinterface = \"androidx.exifinterface:exifinterface:\${exifinterfaceV}\"\n" +
+            "    compressor = \"id.zelory:compressor:\${compressorV}\"\n" +
+            "\n" +
+            "    //Camera\n" +
+            "    cameraView = \"com.otaliastudios:cameraview:\${cameraViewV}\"\n" +
+            "\n" +
+            "    //Billings\n" +
+            "    billing = \"com.android.billingclient:billing:\${billingV}\"\n" +
+            "\n" +
+            "    skeleton = \"com.ethanhua:skeleton:\${skeletonV}\"\n" +
+            "    shimmerlayout = \"io.supercharge:shimmerlayout:\${shimmerlayoutV}\"\n" +
+            "\n" +
+            "    exoplayerCore = \"com.google.android.exoplayer:exoplayer-core:\${exoplayerCoreV}\"\n" +
+            "    exoplayerDash = \"com.google.android.exoplayer:exoplayer-dash:\${exoplayerDashV}\"\n" +
+            "    exoplayerUi = \"com.google.android.exoplayer:exoplayer-ui:\${exoplayerUiV}\"\n" +
+            "\n" +
+            "    dashedCircularProgress = \"com.github.jakob-grabner:Circle-Progress-View:\${dashedCircularProgressV}\"\n" +
+            "\n" +
+            "    customTabs = \"com.android.support:customtabs:\${customTabsV}\"\n" +
+            "\n" +
+            "}"
     )
 
     class AppBuildGradle(packageName: String) : FileType(
@@ -1016,13 +1420,14 @@ sealed class FileType(val fileName: String, val content: String) {
                 "apply plugin: 'kotlin-android'\n" +
                 "apply plugin: 'kotlin-android-extensions'\n" +
                 "apply plugin: 'kotlin-kapt'\n" +
+                "apply from: '../dependencies.gradle'\n" +
                 "\n" +
                 "android {\n" +
-                "    compileSdkVersion 28\n" +
+                "    compileSdkVersion compileSdk\n" +
                 "    defaultConfig {\n" +
                 "        applicationId \"$packageName\"\n" +
-                "        minSdkVersion 22\n" +
-                "        targetSdkVersion 28\n" +
+                "        minSdkVersion minSdk\n" +
+                "        targetSdkVersion targetSdk\n" +
                 "        versionCode 1\n" +
                 "        versionName \"0.0.1\"\n" +
                 "        testInstrumentationRunner \"androidx.test.runner.AndroidJUnitRunner\"\n" +
@@ -1060,43 +1465,45 @@ sealed class FileType(val fileName: String, val content: String) {
                 "    }\n" +
                 "}\n" +
                 "\n" +
-                "dependencies {\n" +
+               "dependencies {\n" +
                 "\n" +
                 "    implementation fileTree(dir: 'libs', include: ['*.jar'])\n" +
                 "\n" +
                 "    implementation project(':repository')\n" +
-                "    implementation project(':utils')\n" +
                 "\n" +
-                "    implementation Deps.kotlinStdlib\n" +
-                "    implementation Deps.androidKtx\n" +
+                "    implementation \"org.jetbrains.kotlin:kotlin-stdlib-jdk7:\${kotlinV}\"\n" +
+                "    implementation \"androidx.core:core-ktx:\${androidKtxV}\"\n" +
                 "\n" +
-                "    implementation Deps.constraintLayout\n" +
-                "    implementation Deps.appCompat\n" +
+                "    implementation \"androidx.constraintlayout:constraintlayout:\${constraintLayoutV}\"\n" +
+                "    implementation \"androidx.appcompat:appcompat:\${androidXV}\"\n" +
+                "    implementation \"com.google.android.material:material:\${androidXV}\"\n" +
                 "\n" +
-                "    implementation Deps.material\n" +
+                "    implementation \"io.reactivex.rxjava2:rxjava:\${rxJavaV}\"\n" +
+                "    implementation \"io.reactivex.rxjava2:rxkotlin:\${rxKotlinV}\"\n" +
+                "    implementation \"io.reactivex.rxjava2:rxandroid:\${rxAndroidV}\"\n" +
+                "    implementation \"com.jakewharton.rxrelay2:rxrelay:\${rxRelayV}\"\n" +
+                "    implementation \"com.jakewharton.rxbinding2:rxbinding-kotlin:\${rxBindingV}\"\n" +
+                "    implementation \"com.jakewharton.rxbinding2:rxbinding-design-kotlin:\${rxBindingV}\"\n" +
+                "    implementation \"com.jakewharton.rxbinding2:rxbinding-appcompat-v7:\${rxBindingV}\"\n" +
                 "\n" +
-                "    implementation Deps.rxJava\n" +
-                "    implementation Deps.rxKotlin\n" +
-                "    implementation Deps.rxAndroid\n" +
-                "    implementation Deps.rxRelay\n" +
-                "    implementation Deps.rxBindingKotlin\n" +
-                "    implementation Deps.rxBindingDesignKotlin\n" +
-                "    implementation Deps.rxBindingAppCompatV7Kotlin\n" +
+                "    implementation \"androidx.navigation:navigation-fragment-ktx:\${navigationV}\"\n" +
+                "    implementation \"androidx.navigation:navigation-ui-ktx:\${navigationV}\"\n" +
+                "    implementation \"androidx.lifecycle:lifecycle-viewmodel-ktx:\${viewmodelKTXV}\"\n" +
+                "    implementation \"androidx.lifecycle:lifecycle-reactivestreams-ktx:\${lifecycleReactiveStreamsV}\"\n" +
+                "    implementation \"androidx.lifecycle:lifecycle-extensions:\${lifecycleV}\"\n" +
                 "\n" +
-                "    implementation Deps.navigationFragment\n" +
-                "    implementation Deps.navigationUI\n" +
+                "    implementation \"org.koin:koin-core:\${koinV}\"\n" +
+                "    implementation \"org.koin:koin-android:\${koinV}\"\n" +
+                "    implementation \"org.koin:koin-androidx-scope:\${koinV}\"\n" +
+                "    implementation \"org.koin:koin-androidx-viewmodel:\${koinV}\"\n" +
                 "\n" +
-                "    implementation Deps.lifecycle\n" +
+                "    implementation \"com.github.bumptech.glide:glide:\${glideV}\"\n" +
+                "    kapt \"com.github.bumptech.glide:compiler:\${glideV}\"\n" +
                 "\n" +
-                "    implementation Deps.koinCore\n" +
-                "    implementation Deps.koinAndroid\n" +
-                "    implementation Deps.koinCoreScope\n" +
-                "    implementation Deps.koinAndroidViewModel\n" +
-                "\n" +
-                "    testImplementation Deps.jUnit\n" +
-                "    androidTestImplementation Deps.androidTestRunner\n" +
-                "    androidTestImplementation Deps.espresso\n" +
-                "}\n"
+                "    testImplementation \"junit:junit:\${jUnitV}\"\n" +
+                "    androidTestImplementation \"androidx.test:runner:\${androidTestRunnerV}\"\n" +
+                "    androidTestImplementation \"androidx.test.espresso:espresso-core:\${espressoV}\"\n" +
+                "}"
     )
 
     class RepoBuildGradle : FileType(
@@ -1105,13 +1512,17 @@ sealed class FileType(val fileName: String, val content: String) {
                 "apply plugin: 'kotlin-android-extensions'\n" +
                 "apply plugin: 'kotlin-android'\n" +
                 "apply plugin: \"kotlin-kapt\"\n" +
+                "apply from: '../dependencies.gradle'\n" +
+                "\n" +
+                "repositories {\n" +
+                "    mavenCentral()\n" +
+                "}\n" +
                 "\n" +
                 "android {\n" +
-                "    compileSdkVersion 28\n" +
-                "\n" +
+                "    compileSdkVersion compileSdk\n" +
                 "    defaultConfig {\n" +
-                "        minSdkVersion 21\n" +
-                "        targetSdkVersion 28\n" +
+                "        minSdkVersion minSdk\n" +
+                "        targetSdkVersion targetSdk\n" +
                 "        versionCode 1\n" +
                 "        versionName \"1.0\"\n" +
                 "\n" +
@@ -1150,318 +1561,41 @@ sealed class FileType(val fileName: String, val content: String) {
                 "dependencies {\n" +
                 "    implementation fileTree(dir: 'libs', include: ['*.jar'])\n" +
                 "\n" +
-                "    implementation Deps.appCompat\n" +
-                "    implementation Deps.kotlinStdlib\n" +
+                "    implementation \"androidx.appcompat:appcompat:\${androidXV}\"\n" +
+                "    implementation \"org.jetbrains.kotlin:kotlin-stdlib-jdk7:\${kotlinV}\"\n" +
                 "\n" +
-                "    implementation Deps.lifecycle\n" +
+                "    implementation \"androidx.lifecycle:lifecycle-extensions:\${lifecycleV}\"\n" +
                 "\n" +
-                "    implementation Deps.rxJava\n" +
-                "    implementation Deps.rxRelay\n" +
-                "    implementation Deps.rxAndroid\n" +
+                "    implementation \"io.reactivex.rxjava2:rxjava:\${rxJavaV}\"\n" +
+                "    implementation \"com.jakewharton.rxrelay2:rxrelay:\${rxRelayV}\"\n" +
+                "    implementation \"io.reactivex.rxjava2:rxandroid:\${rxAndroidV}\"\n" +
                 "\n" +
-                "    implementation Deps.okHttp\n" +
-                "    implementation Deps.okHttpInteceptor\n" +
+                "    implementation \"com.squareup.okhttp3:okhttp:\${okHttpV}\"\n" +
+                "    implementation \"com.squareup.okhttp3:logging-interceptor:\${okHttpV}\"\n" +
                 "\n" +
-                "    implementation Deps.retrofit\n" +
-                "    implementation Deps.retrofitRxJavaAdapter\n" +
-                "    implementation Deps.retrofitConverterLoganSquare\n" +
+                "    implementation \"com.squareup.retrofit2:retrofit:\${retrofitV}\"\n" +
+                "    implementation \"com.squareup.retrofit2:adapter-rxjava2:\${retrofitV}\"\n" +
+                "    implementation  \"com.github.aurae.retrofit2:converter-logansquare:\${retrofitConverterLoganSquareV}\"\n" +
                 "\n" +
-                "    implementation Deps.loganSquare\n" +
-                "    kapt Deps.loganSquareCompiler\n" +
-                "    implementation Deps.jacksonCore\n" +
+                "    implementation \"com.bluelinelabs:logansquare:\${loganSquareV}\"\n" +
+                "    kapt \"com.bluelinelabs:logansquare-compiler:\${loganSquareV}\"\n" +
+                "    implementation \"com.fasterxml.jackson.core:jackson-core:\${loganSquareV}\"\n" +
                 "\n" +
-                "    implementation Deps.room\n" +
-                "    implementation Deps.rxRoom\n" +
-                "    kapt Deps.roomCompiler\n" +
+                "    implementation \"androidx.room:room-runtime:\${roomV}\"\n" +
+                "    implementation \"androidx.room:room-rxjava2:\${roomV}\"\n" +
+                "    kapt \"androidx.room:room-compiler:\${roomV}\"\n" +
                 "\n" +
-                "    debugImplementation Deps.debugDb\n" +
+                "    debugImplementation \"com.amitshekhar.android:debug-db:\${debugDbV}\"\n" +
                 "\n" +
-                "    implementation Deps.koinCore\n" +
-                "    implementation Deps.koinAndroid\n" +
-                "    implementation Deps.koinCoreScope\n" +
-                "    implementation Deps.koinAndroidViewModel\n" +
+                "    implementation \"org.koin:koin-core:\${koinV}\"\n" +
+                "    implementation \"org.koin:koin-android:\${koinV}\"\n" +
+                "    implementation \"org.koin:koin-androidx-scope:\${koinV}\"\n" +
+                "    implementation \"org.koin:koin-androidx-viewmodel:\${koinV}\"\n" +
                 "\n" +
-                "    testImplementation Deps.jUnit\n" +
-                "    androidTestImplementation Deps.androidTestRunner\n" +
-                "    androidTestImplementation Deps.espresso\n" +
-                "}\n" +
-                "repositories {\n" +
-                "    mavenCentral()\n" +
-                "}\n"
-    )
-
-    class Deps : FileType(
-        "Deps.kt",
-        "import org.gradle.api.JavaVersion\n" +
-                "\n" +
-                "object General {\n" +
-                "  val sourceCompatibility = JavaVersion.VERSION_1_8\n" +
-                "  val targetCompatibility = JavaVersion.VERSION_1_8\n" +
-                "}\n" +
-                "\n" +
-                "object Version {\n" +
-                "  // project\n" +
-                "  const val minSdk = 21\n" +
-                "  const val targetSdk = 28\n" +
-                "  const val buildToolsVersion = \"28.0.2\"\n" +
-                "  const val compileSdkVersion = 28\n" +
-                "  const val androidGradle = \"3.4.0-beta03\"\n" +
-                "\n" +
-                "  // android\n" +
-                "  const val androidX = \"1.0.0\"\n" +
-                "  const val androidKtx = \"1.0.0-rc02\"   //https://github.com/android/android-ktx\n" +
-                "  const val androidLifecycle = \"2.0.0-alpha1\"\n" +
-                "  const val multidex = \"2.0.0\"\n" +
-                "  const val constraintLayout = \"2.0.0-alpha2\"\n" +
-                "\n" +
-                "  // kotlin\n" +
-                "  const val kotlin = \"1.3.10\" // https://kotlinlang.org/\n" +
-                "  const val coroutinesAndroid = \"1.0.1\" // https://kotlinlang.org/\n" +
-                "\n" +
-                "  //rxExtensions\n" +
-                "  const val rxJava = \"2.2.0\"            //https://github.com/ReactiveX/RxJava\n" +
-                "  const val rxRelay = \"2.0.0\"           //https://github.com/JakeWharton/RxRelay\n" +
-                "  const val rxKotlin = \"2.2.0\"          //https://github.com/ReactiveX/RxKotlin\n" +
-                "  const val rxAndroid = \"2.1.0\"         //https://github.com/ReactiveX/RxAndroid\n" +
-                "  const val rxBinding = \"2.1.1\"         //https://github.com/JakeWharton/RxBinding\n" +
-                "  const val rxBinding3 = \"3.0.0-alpha1\"         //https://github.com/JakeWharton/RxBinding\n" +
-                "  const val rxNetwork = \"2.1.0\"         //https://github.com/pwittchen/ReactiveNetwork\n" +
-                "  const val rxPermissions = \"0.10.2\"    //https://github.com/tbruyelle/RxPermissions\n" +
-                "\n" +
-                "  // dependency injection\n" +
-                "  const val dagger = \"2.17\" //https://github.com/google/dagger\n" +
-                "  const val koin = \"1.0.1\"  //https://github.com/InsertKoinIO/koin\n" +
-                "\n" +
-                "  // general\n" +
-                "  const val mosby = \"3.1.0\" //https://github.com/sockeqwe/mosby\n" +
-                "\n" +
-                "  // network\n" +
-                "  const val okHttp = \"3.11.0\" //https://github.com/square/okhttp\n" +
-                "\n" +
-                "  // serialization\n" +
-                "  const val gson = \"2.8.5\"        //https://github.com/google/gson\n" +
-                "  const val loganSquare = \"1.3.7\" //https://github.com/bluelinelabs/LoganSquare\n" +
-                "  const val jacksonCore = \"2.9.7\" //https://github.com/bluelinelabs/LoganSquare\n" +
-                "\n" +
-                "  // retrofit\n" +
-                "  const val retrofit = \"2.4.0\"                     //https://github.com/square/retrofit\n" +
-                "  const val retrofitConverterGson =\n" +
-                "    \"2.4.0\"        //https://github.com/square/retrofit/tree/master/retrofit-converters/gson\n" +
-                "  const val retrofitConverterLoganSquare = \"1.4.1\" //https://github.com/mannodermaus/retrofit-logansquare\n" +
-                "\n" +
-                "  // apollo\n" +
-                "  const val apollo = \"1.0.0-alpha\"      // https://github.com/apollographql/apollo-android\n" +
-                "\n" +
-                "  //persistence\n" +
-                "  const val room = \"2.0.0-rc01\" //https://developer.android.com/topic/libraries/architecture/room\n" +
-                "\n" +
-                "  //lifecycle\n" +
-                "  const val lifecycle = \"2.0.0-rc01\" //https://developer.android.com/topic/libraries/architecture/lifecycle\n" +
-                "\n" +
-                "  //navigation\n" +
-                "  const val navigation = \"1.0.0-alpha11\" //https://developer.android.com/topic/libraries/architecture/navigation\n" +
-                "\n" +
-                "  //imageLoading\n" +
-                "  const val glide = \"4.8.0\"  //https://github.comalpha07/bumptech/glide\n" +
-                "  const val picasso = \"2.71828\"       //https://github.com/square/picasso\n" +
-                "\n" +
-                "  //profiling\n" +
-                "  const val debugDb = \"1.0.4\"    //https://github.com/amitshekhariitbhu/Android-Debug-Database\n" +
-                "  const val leakCanary = \"1.6.2\" //https://github.com/square/leakcanary\n" +
-                "\n" +
-                "  //social auth\n" +
-                "  const val facebookAnalytics = \"[4,5)\"\n" +
-                "  const val crashlytics = \"2.9.4@aar\"\n" +
-                "  const val fabricPlugin = \"1.+\"\n" +
-                "  const val simpleAuth = \"2.1.3\"  //https://github.com/jaychang0917/SimpleAuth\n" +
-                "\n" +
-                "  // firebase\n" +
-                "  const val firebaseCore = \"16.0.1\"\n" +
-                "  const val firebaseMessaging = \"17.1.0\"\n" +
-                "\n" +
-                "  //Google\n" +
-                "  const val googleServices = \"4.0.1\"\n" +
-                "  const val googleAuth = \"16.0.0\"\n" +
-                "  const val googleMaps = \"16.0.0\"\n" +
-                "  const val googleLocation = \"16.0.0\"\n" +
-                "\n" +
-                "  // tests\n" +
-                "  const val jUnit = \"4.12\"\n" +
-                "  const val androidTestRunner = \"1.0.0-rc01\"\n" +
-                "  const val espresso = \"3.1.0-alpha4\"\n" +
-                "  const val mockito = \"2.22.0\"\n" +
-                "  const val mockitoAndroid = \"2.22.0\"\n" +
-                "  const val mockitoKotlin = \"2.0.0-RC1\"\n" +
-                "\n" +
-                "  //ImageProcessing\n" +
-                "  const val gpuImage = \"2.0.3\"\n" +
-                "  const val exifinterface = \"1.0.0\"\n" +
-                "  const val compressor = \"2.1.0\"\n" +
-                "\n" +
-                "  //Camera\n" +
-                "  const val cameraView = \"2.0.0-beta03\"\n" +
-                "  //Billing\n" +
-                "  const val billing = \"1.2.1\"\n" +
-                "  const val skeleton = \"1.1.2\"\n" +
-                "  const val shimmerlayout = \"2.1.0\"\n" +
-                "}\n" +
-                "\n" +
-                "object Deps {\n" +
-                "\n" +
-                "  // Android\n" +
-                "  const val androidCore = \"androidx.core:core:\${Version.androidX}\"\n" +
-                "  const val androidAnnotation = \"androidx.annotation:annotation:\${Version.androidX}\"\n" +
-                "  const val androidLifecycle = \"androidx.lifecycle:lifecycle-runtime:\${Version.androidLifecycle}\"\n" +
-                "  const val appCompat = \"androidx.appcompat:appcompat:\${Version.androidX}\"\n" +
-                "  const val material = \"com.google.android.material:material:\${Version.androidX}\"\n" +
-                "  const val palette = \"androidx.palette:palette:\${Version.androidX}\"\n" +
-                "  const val constraintLayout = \"androidx.constraintlayout:constraintlayout:\${Version.constraintLayout}\"\n" +
-                "  const val cardview = \"androidx.cardview:cardview:\${Version.androidX}\"\n" +
-                "  const val multidex = \"androidx.multidex:multidex:\${Version.multidex}\"\n" +
-                "  const val animatedVector = \"androidx.vectordrawable:vectordrawable-animated:\${Version.androidX}\"\n" +
-                "\n" +
-                "  const val androidKtx = \"androidx.core:core-ktx:\${Version.androidKtx}\"\n" +
-                "  const val paletteKtx = \"androidx.palette:palette-ktx:\${Version.androidKtx}\"\n" +
-                "  const val fragmentKtx = \"androidx.fragment:fragment-ktx:\${Version.androidKtx}\"\n" +
-                "  const val collectionKtx = \"androidx.collection:collection-ktx:\${Version.androidKtx}\"\n" +
-                "\n" +
-                "  // Kotlin\n" +
-                "  const val kotlinStdlib = \"org.jetbrains.kotlin:kotlin-stdlib-jdk7:\${Version.kotlin}\"\n" +
-                "\n" +
-                "  // Coroutines\n" +
-                "  const val coroutines = \"org.jetbrains.kotlinx:kotlinx-coroutines-core:\${Version.coroutinesAndroid}\"\n" +
-                "  const val coroutinesAndroid = \"org.jetbrains.kotlinx:kotlinx-coroutines-android:\${Version.coroutinesAndroid}\"\n" +
-                "\n" +
-                "  // RxExtension\n" +
-                "  const val rxJava = \"io.reactivex.rxjava2:rxjava:\${Version.rxJava}\"\n" +
-                "  const val rxRelay = \"com.jakewharton.rxrelay2:rxrelay:\${Version.rxRelay}\"\n" +
-                "  const val rxKotlin = \"io.reactivex.rxjava2:rxkotlin:\${Version.rxKotlin}\"\n" +
-                "  const val rxAndroid = \"io.reactivex.rxjava2:rxandroid:\${Version.rxAndroid}\"\n" +
-                "\n" +
-                "  const val rxBinding = \"com.jakewharton.rxbinding3:rxbinding:\${Version.rxBinding3}\"\n" +
-                "  const val rxBindingCore = \"com.jakewharton.rxbinding3:rxbinding-core:\${Version.rxBinding3}\"\n" +
-                "  const val rxBindingAppCompat = \"com.jakewharton.rxbinding3:rxbinding-appcompat:\${Version.rxBinding3}\"\n" +
-                "  const val rxBindingDrawer = \"com.jakewharton.rxbinding3:rxbinding-drawerlayout:\${Version.rxBinding3}\"\n" +
-                "  const val rxBindingLeanBack = \"com.jakewharton.rxbinding3:rxbinding-leanback:\${Version.rxBinding3}\"\n" +
-                "  const val rxBindingRecyclerView = \"com.jakewharton.rxbinding3:rxbinding-recyclerview:\${Version.rxBinding3}\"\n" +
-                "  const val rxBindingSlidingPanel = \"com.jakewharton.rxbinding3:rxbinding-slidingpanelayout:\${Version.rxBinding3}\"\n" +
-                "  const val rxBindingSwipeRefresh = \"com.jakewharton.rxbinding3:rxbinding-swiperefreshlayout:\${Version.rxBinding3}\"\n" +
-                "  const val rxBindingViewPager = \"com.jakewharton.rxbinding3:rxbinding-viewpager:\${Version.rxBinding3}\"\n" +
-                "  const val rxBindingDesign = \"com.jakewharton.rxbinding3:rxbinding-material:\${Version.rxBinding3}\"\n" +
-                "\n" +
-                "  const val rxNetwork = \"com.github.pwittchen:reactivenetwork-rx2:\${Version.rxNetwork}\"\n" +
-                "  const val rxPermissions = \"com.github.tbruyelle:rxpermissions:\${Version.rxPermissions}\"\n" +
-                "  const val rxBindingKotlin = \"com.jakewharton.rxbinding2:rxbinding-kotlin:\${Version.rxBinding}\"\n" +
-                "  const val rxBindingDesignKotlin = \"com.jakewharton.rxbinding2:rxbinding-design-kotlin:\${Version.rxBinding}\"\n" +
-                "  const val rxBindingAppCompatV4Kotlin = \"com.jakewharton.rxbinding2:rxbinding-support-v4-kotlin:\${Version.rxBinding}\"\n" +
-                "  const val rxBindingAppCompatV7Kotlin = \"com.jakewharton.rxbinding2:rxbinding-appcompat-v7:\${Version.rxBinding}\"\n" +
-                "  const val rxBindingRecyclerViewV7Kotlin =\n" +
-                "    \"com.jakewharton.rxbinding2:rxbinding-recyclerview-v7-kotlin:\${Version.rxBinding}\"\n" +
-                "\n" +
-                "  // Dependency Injection\n" +
-                "  const val inject = \"javax.inject:javax.inject:1\"\n" +
-                "  const val dagger = \"com.google.dagger:dagger:\${Version.dagger}\"\n" +
-                "  const val daggerCompiler = \"com.google.dagger:dagger-compiler:\${Version.dagger}\"\n" +
-                "  const val koinCore = \"org.koin:koin-core:\${Version.koin}\"\n" +
-                "  const val koinAndroid = \"org.koin:koin-android:\${Version.koin}\"\n" +
-                "  const val koinCoreScope = \"org.koin:koin-androidx-scope:\${Version.koin}\"\n" +
-                "  const val koinAndroidViewModel = \"org.koin:koin-androidx-viewmodel:\${Version.koin}\"\n" +
-                "  const val koinTests = \"org.koin:koin-test:\${Version.koin}\"\n" +
-                "\n" +
-                "  // General\n" +
-                "  const val mosby = \"com.hannesdorfmann.mosby3:mvi:\${Version.mosby}\"\n" +
-                "\n" +
-                "  // Network\n" +
-                "  const val okHttp = \"com.squareup.okhttp3:okhttp:\${Version.okHttp}\"\n" +
-                "  const val okHttpInteceptor = \"com.squareup.okhttp3:logging-interceptor:\${Version.okHttp}\"\n" +
-                "\n" +
-                "  // Retrofit\n" +
-                "  const val retrofit = \"com.squareup.retrofit2:retrofit:\${Version.retrofit}\"\n" +
-                "  const val retrofitRxJavaAdapter = \"com.squareup.retrofit2:adapter-rxjava2:\${Version.retrofit}\"\n" +
-                "  const val retrofitConverterGson = \"com.squareup.retrofit2:converter-gson:\${Version.retrofitConverterGson}\"\n" +
-                "  const val retrofitConverterLoganSquare =\n" +
-                "    \"com.github.aurae.retrofit2:converter-logansquare:\${Version.retrofitConverterLoganSquare}\"\n" +
-                "\n" +
-                "  // Apollo\n" +
-                "  const val apollo = \"com.apollographql.apollo:apollo-runtime:\${Version.apollo}\"\n" +
-                "  const val apolloAndroidSupport = \"com.apollographql.apollo:apollo-android-support:\${Version.apollo}\"\n" +
-                "  const val apolloRxJavaSupport = \"com.apollographql.apollo:apollo-rx2-support:\${Version.apollo}\"\n" +
-                "\n" +
-                "  // Serialization\n" +
-                "  const val gson = \"com.google.code.gson:gson:\${Version.gson}\"\n" +
-                "  const val loganSquare = \"com.bluelinelabs:logansquare:\${Version.loganSquare}\"\n" +
-                "  const val loganSquareCompiler = \"com.bluelinelabs:logansquare-compiler:\${Version.loganSquare}\"\n" +
-                "  const val jacksonCore = \"com.fasterxml.jackson.core:jackson-core:\${Version.loganSquare}\"\n" +
-                "\n" +
-                "  // Persistence\n" +
-                "  const val room = \"androidx.room:room-runtime:\${Version.room}\"\n" +
-                "  const val roomCompiler = \"androidx.room:room-compiler:\${Version.room}\"\n" +
-                "  const val rxRoom = \"androidx.room:room-rxjava2:\${Version.room}\"\n" +
-                "\n" +
-                "  // Lifecycle\n" +
-                "  const val lifecycle = \"androidx.lifecycle:lifecycle-extensions:\${Version.lifecycle}\"\n" +
-                "\n" +
-                "  // Navigation\n" +
-                "  const val navigationFragment = \"android.arch.navigation:navigation-fragment-ktx:\${Version.navigation}\"\n" +
-                "  const val navigationUI = \"android.arch.navigation:navigation-ui-ktx:\${Version.navigation}\"\n" +
-                "\n" +
-                "  // ImageLoading\n" +
-                "  const val glide = \"com.github.bumptech.glide:glide:\${Version.glide}\"\n" +
-                "  const val glideCompiler = \"com.github.bumptech.glide:compiler:\${Version.glide}\"\n" +
-                "  const val glideOkHttp3 = \"com.github.bumptech.glide:okhttp3-integration:\${Version.glide}\"\n" +
-                "  const val picasso = \"com.squareup.picasso:picasso:\${Version.picasso}\"\n" +
-                "\n" +
-                "  // Profiling\n" +
-                "  const val debugDb = \"com.amitshekhar.android:debug-db:\${Version.debugDb}\"\n" +
-                "  const val leakCanaryDebug = \"com.squareup.leakcanary:leakcanary-android:\${Version.leakCanary}\"\n" +
-                "  const val leakCanaryRelease = \"com.squareup.leakcanary:leakcanary-android-no-op:\${Version.leakCanary}\"\n" +
-                "  const val leakCanaryFragment = \"com.squareup.leakcanary:leakcanary-support-fragment:\${Version.leakCanary}\"\n" +
-                "\n" +
-                "  // Social auth\n" +
-                "  const val googleAuth = \"com.google.android.gms:play-services-auth:\${Version.googleAuth}\"\n" +
-                "  const val socialAuth = \"com.jaychang:simpleauth:\${Version.simpleAuth}\"\n" +
-                "  const val socialAuthFacebook = \"com.jaychang:simpleauth-facebook:\${Version.simpleAuth}\"\n" +
-                "  const val socialAuthGoogle = \"com.jaychang:simpleauth-google:\${Version.simpleAuth}\"\n" +
-                "  const val socialAuthInstagram = \"com.jaychang:simpleauth-instagram:\${Version.simpleAuth}\"\n" +
-                "  const val socialAuthTwitter = \"com.jaychang:simpleauth-twitter:\${Version.simpleAuth}\"\n" +
-                "\n" +
-                "  // Facebook\n" +
-                "  const val facebookAnalytics = \"com.facebook.android:facebook-android-sdk:\${Version.facebookAnalytics}\"\n" +
-                "\n" +
-                "  // Fabric\n" +
-                "  const val fabricPlugin = \"io.fabric.tools:gradle:\${Version.fabricPlugin}\"\n" +
-                "  const val crashlytics = \"com.crashlytics.sdk.android:crashlytics:\${Version.crashlytics}\"\n" +
-                "\n" +
-                "  // Firebase\n" +
-                "  const val firebaseCore = \"com.google.firebase:firebase-core:\${Version.firebaseCore}\"\n" +
-                "  const val firebaseMessaging = \"com.google.firebase:firebase-messaging:\${Version.firebaseMessaging}\"\n" +
-                "\n" +
-                "  //Maps\n" +
-                "  const val googleMaps = \"com.google.android.gms:play-services-maps:\${Version.googleMaps}\"\n" +
-                "  const val googleLocation = \"com.google.android.gms:play-services-location:\${Version.googleLocation}\"\n" +
-                "\n" +
-                "  // Tests\n" +
-                "  const val jUnit = \"junit:junit:\${Version.jUnit}\"\n" +
-                "  const val mockito = \"org.mockito:mockito-core:\${Version.mockito}\"\n" +
-                "  const val mockitoKotlin = \"com.nhaarman.mockitokotlin2:mockito-kotlin:\${Version.mockitoKotlin}\"\n" +
-                "  const val mockitoAndroid = \"org.mockito:mockito-android:\${Version.mockitoAndroid}\"\n" +
-                "  const val mockitoInline = \"org.mockito:mockito-inline:+\"\n" +
-                "  const val androidTestRunner = \"androidx.test:runner:\${Version.androidTestRunner}\"\n" +
-                "  const val espresso = \"androidx.test.espresso:espresso-core:\${Version.espresso}\"\n" +
-                "\n" +
-                "  //ImageProcessing\n" +
-                "  const val gpuImage = \"jp.co.cyberagent.android:gpuimage:\${Version.gpuImage}\"\n" +
-                "  const val exifinterface = \"androidx.exifinterface:exifinterface:\${Version.exifinterface}\"\n" +
-                "  const val compressor = \"id.zelory:compressor:\${Version.compressor}\"\n" +
-                "\n" +
-                "  //Camera\n" +
-                "  const val cameraView = \"com.otaliastudios:cameraview:\${Version.cameraView}\"\n" +
-                "\n" +
-                "  //Billings\n" +
-                "  const val billing = \"com.android.billingclient:billing:\${Version.billing}\"\n" +
-                "\n" +
-                "  const val skeleton = \"com.ethanhua:skeleton:\${Version.skeleton}\"\n" +
-                "  const val shimmerlayout = \"io.supercharge:shimmerlayout:\${Version.shimmerlayout}\"\n" +
+                "    testImplementation \"junit:junit:\${jUnitV}\"\n" +
+                "    androidTestImplementation \"androidx.test:runner:\${androidTestRunnerV}\"\n" +
+                "    androidTestImplementation \"androidx.test.espresso:espresso-core:\${espressoV}\"\n" +
                 "}"
+
     )
 }

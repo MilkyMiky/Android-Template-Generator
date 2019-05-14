@@ -7,7 +7,6 @@ interface SourceRootRepository {
 
     fun findAppModuleCodeSourceRoot(): SourceRoot
     fun findAppModuleResSourceRoot(): SourceRoot
-//    fun findCodeSourceRoots(): List<SourceRoot>
 }
 
 class SourceRootRepositoryImpl(private val projectStructure: ProjectStructure) : SourceRootRepository {
