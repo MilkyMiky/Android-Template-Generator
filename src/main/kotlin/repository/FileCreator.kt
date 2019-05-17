@@ -2,25 +2,18 @@ package repository
 
 import com.intellij.lang.xml.XMLLanguage
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.psi.PsiFileFactory
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.psi.PsiDirectory
-import com.intellij.psi.PsiManager
+import com.intellij.psi.*
 import com.intellij.util.IncorrectOperationException
 import data.FileType
 import org.jetbrains.kotlin.idea.KotlinLanguage
-import com.intellij.psi.PsiDocumentManager
 
 
 interface FileCreator {
-
     fun createMVIModule(fileName: String, moduleName: String, packageName: String)
-
-    fun createRepository(packageName: String)
-
-    fun prepareAppModule(packageName: String)
-
+    fun createRepository(projectName: String, packageName: String)
+    fun prepareAppModule(projectName: String, packageName: String)
 }
 
 class FileCreatorImpl(
@@ -28,26 +21,44 @@ class FileCreatorImpl(
     private val sourceRootRepository: SourceRootRepository
 ) : FileCreator {
 
-    override fun prepareAppModule(packageName: String) {
+    override fun prepareAppModule(projectName: String, packageName: String) {
         ApplicationManager.getApplication().runWriteAction {
 
             val projectDirectory = project.projectFile!!.parent.parent
 
-            createBuildGradle(FileType.DepsBuildGradle(), PsiManager.getInstance(project).findDirectory(projectDirectory)!!)
+            createBuildGradle(
+                FileType.DepsBuildGradle(),
+                PsiManager.getInstance(project).findDirectory(projectDirectory)!!
+            )
 
             val appVF = projectDirectory.findChild("app")!!
-
             val appPsiDir = PsiManager.getInstance(project).findDirectory(appVF)!!
             appPsiDir.findFile("build.gradle")!!.delete()
-            createBuildGradle(FileType.AppBuildGradle(packageName), appPsiDir)
+            createBuildGradle(FileType.AppBuildGradle(projectName, packageName), appPsiDir)
+
+            val srcVF = appVF.findChild("src")!!
+            val mainVF = srcVF.findChild("main")!!
+            val manifestPsiFile =
+                PsiManager.getInstance(project).findDirectory(mainVF)?.findFile("AndroidManifest.xml")!!
+            val doc = PsiDocumentManager.getInstance(project).getDocument(manifestPsiFile)!!
+            val newManifestContent = doc.text.replace(
+                "<application", "<application\n" +
+                        "            android:name=\".application.${projectName}App\""
+            )
+            manifestPsiFile.delete()
+            val file = PsiFileFactory.getInstance(project).createFileFromText("AndroidManifest.xml", newManifestContent)
+            PsiManager.getInstance(project).findDirectory(mainVF)!!.add(file)
+
 
             var dirVF = sourceRootRepository.findAppModuleCodeSourceRoot().virtualFile
             for (pack in packageName.split(".").toTypedArray()) dirVF = dirVF.findChild(pack)!!
 
             val applicationPsiDir = createPackageDirectory("application", dirVF)
+            createKotlinFile(FileType.App(projectName, packageName), applicationPsiDir)
+
             val diPsiDir = createPackageDirectory("di", dirVF)
             createKotlinFile(FileType.MainModule(packageName), diPsiDir)
-            val uiPsiDir = createPackageDirectory("ui", dirVF)
+            createPackageDirectory("ui", dirVF)
             val commonPsiDirectory = createPackageDirectory("common", dirVF)
             createKotlinFile(FileType.NavigationExtensions(packageName), commonPsiDirectory)
 
@@ -60,7 +71,7 @@ class FileCreatorImpl(
     }
 
 
-    override fun createRepository(packageName: String) {
+    override fun createRepository(projectName: String, packageName: String) {
         ApplicationManager.getApplication().runWriteAction {
             val projectDirectory = project.projectFile!!.parent.parent
 
@@ -115,8 +126,8 @@ class FileCreatorImpl(
             createKotlinFile(FileType.EntityLocalSource(packageName), dataSourcePsiDirectory)
 
             val dbPsiDirectory = createPackageDirectory("db", localVF)
-            createKotlinFile(FileType.DbProvider(project.name, packageName), dbPsiDirectory)
-            createKotlinFile(FileType.Database(project.name, packageName), dbPsiDirectory)
+            createKotlinFile(FileType.DbProvider(projectName, packageName), dbPsiDirectory)
+            createKotlinFile(FileType.Database(projectName, packageName), dbPsiDirectory)
             createKotlinFile(FileType.DbTypeConverters(packageName), dbPsiDirectory)
             createKotlinFile(FileType.EntityDao(packageName), dbPsiDirectory)
 
@@ -126,11 +137,11 @@ class FileCreatorImpl(
             val remoteVF = dataVF.findChild("remote")!!
 
             val datasourceRPsiDirectory = createPackageDirectory("datasource", remoteVF)
-            createKotlinFile(FileType.EntityRemoteSource(project.name, packageName), datasourceRPsiDirectory)
+            createKotlinFile(FileType.EntityRemoteSource(projectName, packageName), datasourceRPsiDirectory)
 
             val apiPsiDirectory = createPackageDirectory("api", remoteVF)
-            createKotlinFile(FileType.Api(project.name, packageName), apiPsiDirectory)
-            createKotlinFile(FileType.ApiProvider(project.name, packageName), apiPsiDirectory)
+            createKotlinFile(FileType.Api(projectName, packageName), apiPsiDirectory)
+            createKotlinFile(FileType.ApiProvider(projectName, packageName), apiPsiDirectory)
 
             val entityRPsiDirectory = createPackageDirectory("entity", remoteVF)
             createKotlinFile(FileType.EntityR(packageName), entityRPsiDirectory)
@@ -154,7 +165,7 @@ class FileCreatorImpl(
 
 
             val diPsiDirectory = createPackageDirectory("di", dirVF)
-            createKotlinFile(FileType.RepoModule(project.name, packageName), diPsiDirectory)
+            createKotlinFile(FileType.RepoModule(projectName, packageName), diPsiDirectory)
         }
     }
 
@@ -176,15 +187,6 @@ class FileCreatorImpl(
         }
     }
 
-    private fun findPackageDir(sourceDir: VirtualFile): VirtualFile {
-        var packageDir = sourceDir
-        while (packageDir.children.isNotEmpty()) {
-            if (packageDir.children.first().isDirectory) packageDir = packageDir.children.first()
-            else break
-        }
-        return packageDir
-    }
-
     private fun createPackageDirectory(packageName: String, packageDir: VirtualFile): PsiDirectory =
         PsiManager.getInstance(project).findDirectory(packageDir)!!.createSubdirectory(packageName)
 
@@ -199,25 +201,23 @@ class FileCreatorImpl(
         createKotlinFile(FileType.Fragment(fileName, createdPackagePath, userPackagePath), directory)
     }
 
-    private fun createKotlinFile(fileType: FileType, directory: PsiDirectory) {
+    private fun createKotlinFile(fileType: FileType, directory: PsiDirectory) =
         try {
             val psiFile = PsiFileFactory.getInstance(project)
                 .createFileFromText(fileType.fileName, KotlinLanguage.INSTANCE, fileType.content)
             directory.add(psiFile)
         } catch (e: IncorrectOperationException) {
         }
-    }
 
-    private fun createProguard(directory: PsiDirectory) {
+    private fun createProguard(directory: PsiDirectory) =
         try {
             val proguard = FileType.Proguard()
             val psiFile = PsiFileFactory.getInstance(project).createFileFromText(proguard.fileName, proguard.content)
             directory.add(psiFile)
         } catch (e: IncorrectOperationException) {
         }
-    }
 
-    private fun createBuildGradle(fileType: FileType, directory: PsiDirectory) {
+    private fun createBuildGradle(fileType: FileType, directory: PsiDirectory) =
         try {
             val psiFile = PsiFileFactory.getInstance(project).createFileFromText(fileType.fileName, fileType.content)
             directory.add(psiFile)
@@ -225,14 +225,12 @@ class FileCreatorImpl(
             e.localizedMessage
             e.printStackTrace()
         }
-    }
 
-    private fun createXMLFile(fileType: FileType, directory: PsiDirectory) {
+    private fun createXMLFile(fileType: FileType, directory: PsiDirectory) =
         try {
             val psiFile = PsiFileFactory.getInstance(project)
                 .createFileFromText(fileType.fileName, XMLLanguage.INSTANCE, fileType.content)
             directory.add(psiFile)
         } catch (e: IncorrectOperationException) {
         }
-    }
 }

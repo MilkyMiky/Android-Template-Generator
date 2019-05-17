@@ -8,12 +8,13 @@ import javax.swing.JTextField
 
 class ProjectPanel : JPanel(true) {
 
-
     val packageTextField = JTextField()
+    val projectTextField = JTextField()
 
     init {
         layout = BorderLayout()
         val panel = panel {
+            row("Project name:") { projectTextField() }
             row("Project user package:") { packageTextField() }
         }
         add(panel, BorderLayout.CENTER)

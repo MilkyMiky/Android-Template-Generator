@@ -2,6 +2,29 @@ package data
 
 sealed class FileType(val fileName: String, val content: String) {
 
+
+    class App(projectName: String, packageName: String)  :FileType(
+        "${projectName}App.kt",
+        "package $packageName.application\n" +
+                "\n" +
+                "import android.app.Application\n" +
+                "import androidx.databinding.DataBindingUtil\n" +
+                "import $packageName.di.BindingComponent\n" +
+                "import $packageName.di.mainModule\n" +
+                "import $packageName.repository.di.repoModule\n" +
+                "import org.koin.android.ext.android.startKoin\n" +
+                "\n" +
+                "" +
+                "class ${projectName}App : Application() {\n" +
+                "\n" +
+                "  override fun onCreate() {\n" +
+                "    super.onCreate()\n" +
+                "    startKoin(this, listOf(mainModule, repoModule))\n" +
+                "    DataBindingUtil.setDefaultComponent(BindingComponent())\n" +
+                "  }\n" +
+                "}"
+    )
+
     class NavigationExtensions(packageName: String) : FileType(
         "NavigationExtensions.kt",
         "package $packageName.common\n" +
@@ -1414,7 +1437,7 @@ sealed class FileType(val fileName: String, val content: String) {
             "}"
     )
 
-    class AppBuildGradle(packageName: String) : FileType(
+    class AppBuildGradle(appName:String, packageName: String) : FileType(
         "build.gradle",
         "apply plugin: 'com.android.application'\n" +
                 "apply plugin: 'kotlin-android'\n" +
@@ -1428,11 +1451,20 @@ sealed class FileType(val fileName: String, val content: String) {
                 "        applicationId \"$packageName\"\n" +
                 "        minSdkVersion minSdk\n" +
                 "        targetSdkVersion targetSdk\n" +
-                "        versionCode 1\n" +
-                "        versionName \"0.0.1\"\n" +
+                "        versionCode generateVersionCode()\n" +
+                "        versionName generateVersionName()\n" +
                 "        testInstrumentationRunner \"androidx.test.runner.AndroidJUnitRunner\"\n" +
                 "    }\n" +
                 "\n" +
+                "   applicationVariants.all { variant ->\n" +
+                "        variant.outputs.all { output ->\n" +
+                "            def date = new Date().format(\"dd-MM-yy\", TimeZone.getTimeZone(\"UTC\"))\n" +
+                "            outputFileName = \"$appName\" +\n" +
+                "                    \"_v\${defaultConfig.versionName}\" +\n" +
+                "                    \"_\${date}\" +\n" +
+                "                    \".apk\"\n" +
+                "        }\n" +
+                "    }\n" +
                 "\n" +
                 "  flavorDimensions \"default\"\n" +
                 "\n" +
@@ -1463,6 +1495,19 @@ sealed class FileType(val fileName: String, val content: String) {
                 "    dataBinding {\n" +
                 "        enabled = true\n" +
                 "    }\n" +
+                "}\n" +
+                "\n" +
+                "private Integer generateVersionCode() {\n" +
+                "    return minSdk * 10000000 +\n" +
+                "            versionMajor * 10000 +\n" +
+                "            versionMinor * 100 +\n" +
+                "            versionPatch\n" +
+                "}\n" +
+                "\n" +
+                "private String generateVersionName() {\n" +
+                "    String versionName = \"\${versionMajor}.\${versionMinor}.\${versionPatch}\"\n" +
+                "    if (versionClassifier != null && !versionClassifier.isEmpty()) versionName += \"-\" + ext.versionClassifier\n" +
+                "    return versionName\n" +
                 "}\n" +
                 "\n" +
                "dependencies {\n" +
