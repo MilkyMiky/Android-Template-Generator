@@ -64,8 +64,8 @@ class FileCreatorImpl(
 
             createKotlinFile(FileType.BaseComponents(packageName), commonPsiDirectory)
             createKotlinFile(FileType.Common(packageName), commonPsiDirectory)
-            createKotlinFile(FileType.ImageLoader(packageName), commonPsiDirectory)
-            createKotlinFile(FileType.GlideImageLoader(packageName), commonPsiDirectory)
+//            createKotlinFile(FileType.ImageLoader(packageName), commonPsiDirectory)
+//            createKotlinFile(FileType.GlideImageLoader(packageName), commonPsiDirectory)
             createKotlinFile(FileType.ImageBindingAdapter(packageName), commonPsiDirectory)
         }
     }
@@ -118,7 +118,8 @@ class FileCreatorImpl(
             val repoImplPsiDirectory = createPackageDirectory("repositoryImpl", dataVF)
             createKotlinFile(FileType.EntitiesRepositoryImpl(packageName), repoImplPsiDirectory)
 
-            createPackageDirectory("serviceImpl", dataVF)
+           val serviceImplPsiDir = createPackageDirectory("serviceImpl", dataVF)
+            createKotlinFile(FileType.GlideImageLoader(packageName), serviceImplPsiDir)
 
             val localVF = dataVF.findChild("local")!!
 
@@ -161,8 +162,8 @@ class FileCreatorImpl(
             val repoPsiDirectory = createPackageDirectory("repository", domainVF)
             createKotlinFile(FileType.EntitiesRepository(packageName), repoPsiDirectory)
 
-            createPackageDirectory("service", domainVF)
-
+          val servicePsiDir =   createPackageDirectory("service", domainVF)
+            createKotlinFile(FileType.ImageLoader(packageName), servicePsiDir)
 
             val diPsiDirectory = createPackageDirectory("di", dirVF)
             createKotlinFile(FileType.RepoModule(projectName, packageName), diPsiDirectory)

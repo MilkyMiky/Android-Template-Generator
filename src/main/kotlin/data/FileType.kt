@@ -266,16 +266,13 @@ sealed class FileType(val fileName: String, val content: String) {
         "MainModule.kt",
         "package $packageName.di\n" +
                 "\n" +
-                "import $packageName.common.GlideImageLoader\n" +
                 "import $packageName.common.ImageBindingAdapter\n" +
-                "import $packageName.common.ImageLoader\n" +
                 "import org.koin.dsl.module.module\n" +
                 "import org.koin.standalone.KoinComponent\n" +
                 "import org.koin.standalone.inject\n" +
                 "\n" +
                 "val mainModule = module {\n" +
                 "\n" +
-                "  single<ImageLoader> { GlideImageLoader }\n" +
                 "  single { ImageBindingAdapter(get()) }\n" +
                 "}\n" +
                 "\n" +
@@ -300,7 +297,7 @@ sealed class FileType(val fileName: String, val content: String) {
                 "import $userPackage.common.BaseView\n" +
                 "import $userPackage.R\n" +
                 "import $userPackage.databinding.Fragment${fileName}Binding\n" +
-                "import $packageName.${fileName}StateIntent.GetSampleData\n" +
+                "import $packageName.${fileName}Intent.GetSampleData\n" +
 
                 "import io.reactivex.Observable\n" +
                 "import org.koin.androidx.viewmodel.ext.android.viewModel\n" +
@@ -353,7 +350,7 @@ sealed class FileType(val fileName: String, val content: String) {
                 "import $userPackage.common.BaseViewModel\n" +
                 "import $userPackage.common.startWithAndErrHandleWithIO\n" +
                 "import $packageName.${fileName}StateChange.*\n" +
-                "import $packageName.${fileName}StateIntent.*\n" +
+                "import $packageName.${fileName}Intent.*\n" +
                 "import io.reactivex.Observable\n" +
                 "\n" +
                 "class ${fileName}ViewModel() : BaseViewModel<${fileName}State>() {\n" +
@@ -406,8 +403,8 @@ sealed class FileType(val fileName: String, val content: String) {
                 "  val error: Throwable? = null\n" +
                 ")\n" +
                 "\n" +
-                "sealed class ${fileName}StateIntent {\n" +
-                "  object GetSampleData : ${fileName}StateIntent()\n" +
+                "sealed class ${fileName}Intent {\n" +
+                "  object GetSampleData : ${fileName}Intent()\n" +
                 "}\n" +
                 "\n" +
                 "sealed class ${fileName}StateChange {\n" +
@@ -662,9 +659,11 @@ sealed class FileType(val fileName: String, val content: String) {
                 "import $packageName.data.remote.api.${projectName}ApiProvider\n" +
                 "import $packageName.data.remote.datasource.EntityRemoteSource\n" +
                 "import $packageName.data.repositoryImpl.EntitiesRepositoryImpl\n" +
+                "import $packageName.data.serviceImpl.GlideImageLoader\n" +
                 "import $packageName.domain.datasource.EntityDataSource\n" +
                 "import $packageName.domain.interactors.*\n" +
                 "import $packageName.domain.repository.EntitiesRepository\n" +
+                "import $packageName.domain.service.ImageLoader\n" +
                 "import org.koin.android.ext.koin.androidContext\n" +
                 "import org.koin.dsl.module.module\n" +
                 "\n" +
@@ -676,6 +675,7 @@ sealed class FileType(val fileName: String, val content: String) {
                 "\n" +
                 "  single { androidContext().getSharedPreferences(\"sharedPrefs\", MODE_PRIVATE) }\n" +
                 "\n" +
+                "  single<ImageLoader> { GlideImageLoader }\n" +
                 "  single<EntityDataSource>(\"local\") { EntityLocalSource(get()) }\n" +
                 "  single<EntityDataSource>(\"remote\") { EntityRemoteSource(get()) }\n" +
                 "\n" +
@@ -815,6 +815,7 @@ sealed class FileType(val fileName: String, val content: String) {
                 "\n" +
                 "import android.widget.ImageView\n" +
                 "import androidx.databinding.BindingAdapter\n" +
+                "import $packageName.repository.domain.service.ImageLoader\n" +
                 "\n" +
                 "class ImageBindingAdapter constructor(private val imageLoader: ImageLoader) {\n" +
                 "\n" +
@@ -863,8 +864,9 @@ sealed class FileType(val fileName: String, val content: String) {
 
     class GlideImageLoader(packageName: String) : FileType(
         "GlideImageLoader.kt",
-        "package $packageName.common\n" +
+        "package $packageName.data.serviceImpl\n" +
                 "\n" +
+                "import android.content.res.Resources\n" +
                 "import android.graphics.Bitmap\n" +
                 "import android.widget.ImageView\n" +
                 "import com.bumptech.glide.Glide\n" +
@@ -875,7 +877,10 @@ sealed class FileType(val fileName: String, val content: String) {
                 "import com.bumptech.glide.load.resource.bitmap.RoundedCorners\n" +
                 "import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions\n" +
                 "import com.bumptech.glide.request.RequestOptions\n" +
+                "import $packageName.domain.service.ImageLoader\n" +
                 "import java.util.ArrayList\n" +
+                "\n" +
+                "val Int.px: Int get() = (this * Resources.getSystem().displayMetrics.density).toInt()\n" +
                 "\n" +
                 "object GlideImageLoader : ImageLoader {\n" +
                 "\n" +
@@ -914,7 +919,7 @@ sealed class FileType(val fileName: String, val content: String) {
 
     class ImageLoader(packageName: String) : FileType(
         "ImageLoader.kt",
-        "package $packageName.common\n" +
+        "package $packageName.domain.service\n" +
                 "\n" +
                 "import android.widget.ImageView\n" +
                 "\n" +
@@ -1542,9 +1547,6 @@ sealed class FileType(val fileName: String, val content: String) {
                 "    implementation \"org.koin:koin-androidx-scope:\${koinV}\"\n" +
                 "    implementation \"org.koin:koin-androidx-viewmodel:\${koinV}\"\n" +
                 "\n" +
-                "    implementation \"com.github.bumptech.glide:glide:\${glideV}\"\n" +
-                "    kapt \"com.github.bumptech.glide:compiler:\${glideV}\"\n" +
-                "\n" +
                 "    testImplementation \"junit:junit:\${jUnitV}\"\n" +
                 "    androidTestImplementation \"androidx.test:runner:\${androidTestRunnerV}\"\n" +
                 "    androidTestImplementation \"androidx.test.espresso:espresso-core:\${espressoV}\"\n" +
@@ -1636,6 +1638,9 @@ sealed class FileType(val fileName: String, val content: String) {
                 "    implementation \"org.koin:koin-android:\${koinV}\"\n" +
                 "    implementation \"org.koin:koin-androidx-scope:\${koinV}\"\n" +
                 "    implementation \"org.koin:koin-androidx-viewmodel:\${koinV}\"\n" +
+                "\n" +
+                "    implementation \"com.github.bumptech.glide:glide:\${glideV}\"\n" +
+                "    kapt \"com.github.bumptech.glide:compiler:\${glideV}\"\n" +
                 "\n" +
                 "    testImplementation \"junit:junit:\${jUnitV}\"\n" +
                 "    androidTestImplementation \"androidx.test:runner:\${androidTestRunnerV}\"\n" +
